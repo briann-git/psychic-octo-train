@@ -62,7 +62,7 @@ class SqliteLedgerRepository(ILedgerRepository):
         return sqlite3.connect(self._db_path)
 
     def record(self, state: BettingState) -> None:
-        verdict = Verdict(**state["verdict"])  # type: ignore[arg-type]
+        verdict = Verdict.from_dict(state["verdict"])  # type: ignore[arg-type]
         fixture = Fixture.from_dict(state["fixture"])
         odds = OddsSnapshot.from_dict(state["odds_snapshot"])
 

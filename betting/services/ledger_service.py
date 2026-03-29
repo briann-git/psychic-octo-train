@@ -1,5 +1,11 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from betting.interfaces.ledger_repository import ILedgerRepository
-from betting.graph.state import BettingState
+
+if TYPE_CHECKING:
+    from betting.graph.state import BettingState
 
 
 class LedgerService:
