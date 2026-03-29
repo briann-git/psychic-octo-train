@@ -3,20 +3,14 @@ from datetime import datetime, timezone
 
 import httpx
 
+from betting.config.league_config import LeagueConfigLoader
 from betting.interfaces.fixture_provider import IFixtureProvider
 from betting.interfaces.odds_provider import IOddsProvider
 from betting.models.fixture import Fixture
 from betting.models.odds import OddsSnapshot
+from betting.utils import season_from_date
 
 logger = logging.getLogger(__name__)
-
-LEAGUE_KEYS: dict[str, str] = {
-    "PL":         "soccer_epl",
-    "La_Liga":    "soccer_spain_la_liga",
-    "Bundesliga": "soccer_germany_bundesliga",
-    "Serie_A":    "soccer_italy_serie_a",
-    "Ligue_1":    "soccer_france_ligue_1",
-}
 
 PREFERRED_BOOKMAKERS: list[str] = ["bet365", "williamhill", "betfair_ex_eu"]
 
@@ -24,8 +18,13 @@ PREFERRED_BOOKMAKERS: list[str] = ["bet365", "williamhill", "betfair_ex_eu"]
 class OddsApiProvider(IFixtureProvider, IOddsProvider):
     """Real implementation backed by The Odds API (https://api.the-odds-api.com)."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        league_loader: LeagueConfigLoader | None = None,
+    ) -> None:
         self._api_key = api_key
+        self._league_loader = league_loader or LeagueConfigLoader()
         self._cache: dict[str, list[dict]] = {}
 
     # ------------------------------------------------------------------
@@ -35,9 +34,9 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
     def fetch_upcoming(self, leagues: list[str], days_ahead: int = 2) -> list[Fixture]:
         results: list[Fixture] = []
         for league in leagues:
-            sport_key = LEAGUE_KEYS.get(league)
+            sport_key = self._league_loader.odds_api_key(league)
             if sport_key is None:
-                logger.warning("League %r not in LEAGUE_KEYS — skipping", league)
+                logger.warning("League %r not in config — skipping", league)
                 continue
             events = self._fetch_events(sport_key)
             for event in events:
@@ -49,9 +48,9 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
     # ------------------------------------------------------------------
 
     def fetch_odds(self, fixture: Fixture, markets: list[str]) -> OddsSnapshot | None:
-        sport_key = LEAGUE_KEYS.get(fixture.league)
+        sport_key = self._league_loader.odds_api_key(fixture.league)
         if sport_key is None:
-            logger.warning("League %r not in LEAGUE_KEYS — cannot fetch odds", fixture.league)
+            logger.warning("League %r not in config — cannot fetch odds", fixture.league)
             return None
         events = self._fetch_events(sport_key)
         for event in events:
@@ -99,7 +98,9 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             home_team=event["home_team"],
             away_team=event["away_team"],
             league=league,
-            season=self._infer_season(event["commence_time"]),
+            season=season_from_date(
+                datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
+            ),
             matchday=0,
             kickoff=datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00")),
             venue=None,
@@ -162,16 +163,3 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
         if p1 <= 0 or p2 <= 0:
             return 0.0
         return round(1.0 / (1.0 / p1 + 1.0 / p2), 4)
-
-    @staticmethod
-    def _infer_season(commence_time: str) -> str:
-        """
-        Derives season string from kickoff date.
-        August onwards = current season (e.g. 2024/25).
-        Before August = previous season started (e.g. 2024/25 for April 2025).
-        """
-        dt = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
-        year = dt.year
-        if dt.month >= 8:
-            return f"{year}/{str(year + 1)[-2:]}"
-        return f"{year - 1}/{str(year)[-2:]}"

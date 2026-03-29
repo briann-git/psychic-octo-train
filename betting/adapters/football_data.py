@@ -2,37 +2,11 @@ import csv
 import logging
 from dataclasses import dataclass
 
+from betting.config.league_config import LeagueConfigLoader
 from betting.interfaces.stats_provider import IStatsProvider
 from betting.models.fixture import Fixture
 
 logger = logging.getLogger(__name__)
-
-LEAGUE_CODES: dict[str, str] = {
-    "PL":         "E0",
-    "La_Liga":    "SP1",
-    "Bundesliga": "D1",
-    "Serie_A":    "I1",
-    "Ligue_1":    "F1",
-}
-
-TEAM_NAME_MAP: dict[str, str] = {
-    "Man United":     "Manchester United",
-    "Man City":       "Manchester City",
-    "Nott'm Forest":  "Nottingham Forest",
-    "Wolves":         "Wolverhampton Wanderers",
-    "Spurs":          "Tottenham Hotspur",
-    "Leicester":      "Leicester City",
-    "Leeds":          "Leeds United",
-    "Ipswich":        "Ipswich Town",
-    "Sunderland":     "Sunderland",
-    "Newcastle":      "Newcastle United",
-    "Brighton":       "Brighton and Hove Albion",
-    "Brentford":      "Brentford",
-    "Bournemouth":    "Bournemouth",
-    "Fulham":         "Fulham",
-    "Southampton":    "Southampton",
-    "Everton":        "Everton",
-}
 
 MIN_GAMES_THRESHOLD = 5
 
@@ -55,8 +29,13 @@ class SeasonRatings:
 
 
 class FootballDataProvider(IStatsProvider):
-    def __init__(self, csv_service) -> None:
+    def __init__(
+        self,
+        csv_service,
+        league_loader: LeagueConfigLoader | None = None,
+    ) -> None:
         self._csv_service = csv_service
+        self._league_loader = league_loader or LeagueConfigLoader()
         self._ratings_cache: dict[str, SeasonRatings] = {}
 
     def get_attack_defence_ratings(
@@ -73,8 +52,8 @@ class FootballDataProvider(IStatsProvider):
         league = fixture.league
         season = fixture.season
 
-        if league not in LEAGUE_CODES:
-            logger.warning("League %r not in LEAGUE_CODES, returning 1.0 ratings", league)
+        if self._league_loader.football_data_code(league) is None:
+            logger.warning("League %r not in config, returning 1.0 ratings", league)
             return 1.0, 1.0, 1.0, 1.0
 
         ratings = self._get_season_ratings(league, season)
@@ -115,8 +94,8 @@ class FootballDataProvider(IStatsProvider):
         Returns (league_avg_home_goals, league_avg_away_goals).
         Derived from full season data for the given league/season.
         """
-        if league not in LEAGUE_CODES:
-            logger.warning("League %r not in LEAGUE_CODES, returning default averages", league)
+        if self._league_loader.football_data_code(league) is None:
+            logger.warning("League %r not in config, returning default averages", league)
             return 1.5, 1.2
 
         ratings = self._get_season_ratings(league, season)
@@ -147,6 +126,8 @@ class FootballDataProvider(IStatsProvider):
         csv_path = self._csv_service.get(league, season)
         logger.info("Loading ratings for %s %s from %s", league, season, csv_path)
 
+        team_name_map = self._league_loader.team_names(league)
+
         home_goals_by_team: dict[str, list[float]] = {}
         home_conceded_by_team: dict[str, list[float]] = {}
         away_goals_by_team: dict[str, list[float]] = {}
@@ -173,8 +154,8 @@ class FootballDataProvider(IStatsProvider):
                 home_team_raw = row.get("HomeTeam", "").strip()
                 away_team_raw = row.get("AwayTeam", "").strip()
 
-                home_team = TEAM_NAME_MAP.get(home_team_raw, home_team_raw)
-                away_team = TEAM_NAME_MAP.get(away_team_raw, away_team_raw)
+                home_team = team_name_map.get(home_team_raw, home_team_raw)
+                away_team = team_name_map.get(away_team_raw, away_team_raw)
 
                 home_goals_by_team.setdefault(home_team, []).append(fthg)
                 home_conceded_by_team.setdefault(home_team, []).append(ftag)

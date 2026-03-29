@@ -11,6 +11,9 @@ class BettingState(TypedDict):
     # Set by StatisticalNode
     statistical_signal: Optional[dict]   # serialised Signal
 
+    # Set by MarketNode
+    market_signal: Optional[dict]        # serialised Signal
+
     # Set by SynthesiserNode
     verdict: Optional[dict]              # serialised Verdict
 

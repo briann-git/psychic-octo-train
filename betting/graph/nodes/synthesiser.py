@@ -7,19 +7,38 @@ from betting.models.verdict import Verdict
 
 
 class SynthesiserNode:
-    """
-    STUB — spine only.
-    When real agents are wired in, this node:
-      1. Checks each signal for veto flag
-      2. Applies weighted vote across available signals
-      3. Compares weighted confidence to CONFIDENCE_THRESHOLD
-      4. Returns Verdict with recommendation
-    """
+    def __init__(
+        self,
+        weights: dict[str, float],
+        confidence_threshold: float,
+    ) -> None:
+        self._weights = weights
+        self._confidence_threshold = confidence_threshold
 
     def __call__(self, state: BettingState) -> dict:
-        statistical = state.get("statistical_signal")
+        signals_raw = [
+            state.get("statistical_signal"),
+            state.get("market_signal"),
+        ]
+        signals = [Signal(**s) for s in signals_raw if s is not None]
 
-        if not statistical:
+        # 1. Veto check
+        for signal in signals:
+            if signal.veto:
+                verdict = Verdict(
+                    fixture_id=state["fixture"]["id"],
+                    market=state["markets"][0],
+                    recommendation="skip",
+                    consensus_confidence=0.0,
+                    expected_value=0.0,
+                    signals_used=len(signals),
+                    synthesised_at=datetime.now(tz=timezone.utc),
+                    skip_reason=signal.veto_reason or "veto",
+                )
+                return {"verdict": asdict(verdict)}
+
+        # 2. No signals available
+        if not signals:
             verdict = Verdict(
                 fixture_id=state["fixture"]["id"],
                 market=state["markets"][0],
@@ -30,17 +49,60 @@ class SynthesiserNode:
                 synthesised_at=datetime.now(tz=timezone.utc),
                 skip_reason="no signals available",
             )
-        else:
-            signal = Signal(**statistical)
-            verdict = Verdict(
-                fixture_id=signal.fixture_id,
-                market=state["markets"][0],
-                recommendation=signal.recommendation,
-                consensus_confidence=signal.confidence,
-                expected_value=signal.edge,
-                signals_used=1,
-                synthesised_at=datetime.now(tz=timezone.utc),
-                selection=signal.selection,
-            )
+            return {"verdict": asdict(verdict)}
 
+        # 3. Weighted vote
+        total_weight = sum(
+            self._weights.get(s.agent_id, 0.0) for s in signals
+        )
+        if total_weight == 0:
+            total_weight = 1.0  # guard against zero division
+
+        weighted_confidence = sum(
+            s.confidence * self._weights.get(s.agent_id, 0.0)
+            for s in signals
+        ) / total_weight
+
+        weighted_edge = sum(
+            s.edge * self._weights.get(s.agent_id, 0.0)
+            for s in signals
+        ) / total_weight
+
+        # 4. Selection — use statistical agent's selection as primary
+        #    fall back to first available signal's selection
+        selection = ""
+        stat_signal = next((s for s in signals if s.agent_id == "statistical"), None)
+        if stat_signal:
+            selection = stat_signal.selection
+        elif signals:
+            selection = signals[0].selection
+
+        # 5. Threshold gate
+        recommendation = (
+            "back"
+            if weighted_confidence >= self._confidence_threshold and weighted_edge > 0
+            else "skip"
+        )
+
+        skip_reason = None
+        if recommendation == "skip":
+            if weighted_edge <= 0:
+                skip_reason = f"no edge (weighted_edge={weighted_edge:.4f})"
+            else:
+                skip_reason = (
+                    f"confidence below threshold "
+                    f"({weighted_confidence:.3f} < {self._confidence_threshold})"
+                )
+
+        verdict = Verdict(
+            fixture_id=state["fixture"]["id"],
+            market=state["markets"][0],
+            recommendation=recommendation,  # type: ignore[arg-type]
+            consensus_confidence=weighted_confidence,
+            expected_value=weighted_edge,
+            signals_used=len(signals),
+            synthesised_at=datetime.now(tz=timezone.utc),
+            selection=selection,
+            skip_reason=skip_reason,
+        )
         return {"verdict": asdict(verdict)}

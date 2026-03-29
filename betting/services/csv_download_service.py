@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 
-from betting.adapters.football_data import LEAGUE_CODES
+from betting.config.league_config import LeagueConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +16,11 @@ class CsvDownloadService:
         self,
         cache_dir: str,
         max_age_hours: int = 24,
+        league_loader: LeagueConfigLoader | None = None,
     ) -> None:
         self._cache_dir = cache_dir
         self._max_age_hours = max_age_hours
+        self._league_loader = league_loader or LeagueConfigLoader()
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
     def get(self, league: str, season: str) -> str:
@@ -70,14 +72,14 @@ class CsvDownloadService:
     def _download(self, league: str, season: str, dest: Path) -> None:
         """
         Downloads CSV to dest. Uses httpx with timeout=15.
-        Derives URL from LEAGUE_CODES and season string.
-        Raises ValueError if league not in LEAGUE_CODES.
+        Derives URL from LeagueConfigLoader and season string.
+        Raises ValueError if league not supported.
         Raises httpx.HTTPError on network failure.
         """
-        if league not in LEAGUE_CODES:
-            raise ValueError(f"League {league!r} not in LEAGUE_CODES")
+        league_code = self._league_loader.football_data_code(league)
+        if league_code is None:
+            raise ValueError(f"League {league!r} not supported")
 
-        league_code = LEAGUE_CODES[league]
         season_code = self._season_code(season)
         url = f"https://www.football-data.co.uk/mmz4281/{season_code}/{league_code}.csv"
 
