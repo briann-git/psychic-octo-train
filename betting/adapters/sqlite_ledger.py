@@ -63,8 +63,8 @@ class SqliteLedgerRepository(ILedgerRepository):
 
     def record(self, state: BettingState) -> None:
         verdict = Verdict(**state["verdict"])  # type: ignore[arg-type]
-        fixture = Fixture(**state["fixture"])
-        odds = OddsSnapshot(**state["odds_snapshot"])
+        fixture = Fixture.from_dict(state["fixture"])
+        odds = OddsSnapshot.from_dict(state["odds_snapshot"])
 
         if verdict.recommendation == "back":
             self._write_pick(fixture, odds, verdict)
