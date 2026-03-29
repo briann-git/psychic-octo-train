@@ -3,14 +3,15 @@ Entry point for the autonomous football betting pipeline.
 Runs via APScheduler at 08:00 UTC daily.
 """
 
+import logging
 from dataclasses import asdict
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from betting.adapters.api_football import ApiFootballProvider
 from betting.adapters.fbref import FBrefProvider
 from betting.adapters.odds_api import OddsApiProvider
 from betting.adapters.sqlite_ledger import SqliteLedgerRepository
+from betting.logging_config import configure_logging
 from betting.config import settings
 from betting.graph.nodes.ingest import IngestNode
 from betting.graph.nodes.ledger import LedgerNode
@@ -22,11 +23,15 @@ from betting.services.fixture_service import FixtureService
 from betting.services.ledger_service import LedgerService
 from betting.services.statistical_service import StatisticalService
 
+configure_logging(settings.log_level)
+logger = logging.getLogger(__name__)
+
 
 def run_pipeline() -> None:
+    logger.info("Pipeline run started")
+
     # 1. Instantiate concrete adapters
-    fixture_provider = ApiFootballProvider(api_key=settings.api_football_key)
-    odds_provider = OddsApiProvider(api_key=settings.odds_api_key)
+    odds_api = OddsApiProvider(api_key=settings.odds_api_key)
     ledger_repo = SqliteLedgerRepository(
         db_path=settings.db_path,
         flat_stake=settings.flat_stake,
@@ -34,8 +39,8 @@ def run_pipeline() -> None:
 
     # 2. Instantiate services with injected providers
     fixture_service = FixtureService(
-        fixture_provider=fixture_provider,
-        odds_provider=odds_provider,
+        fixture_provider=odds_api,
+        odds_provider=odds_api,
         supported_leagues=settings.supported_leagues,
         min_lead_hours=settings.min_lead_hours,
         max_lead_hours=settings.max_lead_hours,
@@ -53,8 +58,16 @@ def run_pipeline() -> None:
 
     # 4. Fetch eligible fixtures and invoke one graph run per fixture
     eligible = fixture_service.get_eligible_fixtures(markets=["double_chance"])
+    logger.info("Found %d eligible fixture(s)", len(eligible))
 
     for fixture, odds in eligible:
+        logger.info(
+            "Processing fixture %s: %s vs %s, kickoff %s",
+            fixture.id,
+            fixture.home_team,
+            fixture.away_team,
+            fixture.kickoff.isoformat(),
+        )
         initial_state: BettingState = {
             "fixture": asdict(fixture),
             "markets": ["double_chance"],
@@ -65,7 +78,12 @@ def run_pipeline() -> None:
             "recorded": False,
             "errors": [],
         }
-        pipeline.invoke(initial_state)
+        try:
+            pipeline.invoke(initial_state)
+        except Exception as exc:
+            logger.error("Unhandled error processing fixture %s: %s", fixture.id, exc)
+
+    logger.info("Pipeline run completed")
 
 
 if __name__ == "__main__":

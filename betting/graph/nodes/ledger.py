@@ -1,9 +1,12 @@
+import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 
 from betting.graph.state import BettingState
 from betting.models.verdict import Verdict
 from betting.services.ledger_service import LedgerService
+
+logger = logging.getLogger(__name__)
 
 
 class LedgerNode:
@@ -33,6 +36,11 @@ class LedgerNode:
             self._service.record(working_state)  # type: ignore[arg-type]
             return {"recorded": True, "verdict": working_state["verdict"]}
         except Exception as exc:
+            logger.warning(
+                "LedgerNode error for fixture %s: %s",
+                state["fixture"].get("id"),
+                exc,
+            )
             return {
                 "recorded": False,
                 "errors": list(state.get("errors", [])) + [f"ledger: {exc}"],

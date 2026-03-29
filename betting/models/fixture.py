@@ -12,3 +12,10 @@ class Fixture:
     matchday: int
     kickoff: datetime
     venue: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Fixture":
+        d = dict(data)
+        if isinstance(d.get("kickoff"), str):
+            d["kickoff"] = datetime.fromisoformat(d["kickoff"])
+        return cls(**d)

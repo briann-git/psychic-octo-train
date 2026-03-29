@@ -1,9 +1,12 @@
+import logging
 from datetime import datetime, timezone, timedelta
 
 from betting.interfaces.fixture_provider import IFixtureProvider
 from betting.interfaces.odds_provider import IOddsProvider
 from betting.models.fixture import Fixture
 from betting.models.odds import OddsSnapshot
+
+logger = logging.getLogger(__name__)
 
 # Known international break windows (start, end) — UTC dates only, times ignored.
 # Extend this list or extract to config as more seasons are tracked.
@@ -55,6 +58,7 @@ class FixtureService:
         for fixture in raw:
             # 1. League filter
             if fixture.league not in self._supported_leagues:
+                logger.debug("Fixture %s filtered: league %r not supported", fixture.id, fixture.league)
                 continue
 
             kickoff = fixture.kickoff
@@ -64,19 +68,27 @@ class FixtureService:
 
             # 2. Lead-time window
             if not (earliest <= kickoff <= latest):
+                logger.debug(
+                    "Fixture %s filtered: kickoff %s outside lead-time window",
+                    fixture.id,
+                    kickoff.isoformat(),
+                )
                 continue
 
             # 3. International break
             if self._is_international_break(kickoff):
+                logger.debug("Fixture %s filtered: international break", fixture.id)
                 continue
 
             # 4. Odds availability
             odds = self._odds_provider.fetch_odds(fixture, markets)
             if odds is None:
+                logger.debug("Fixture %s filtered: no odds available", fixture.id)
                 continue
 
             results.append((fixture, odds))
 
+        logger.info("Total eligible fixtures: %d", len(results))
         return results
 
     def _is_international_break(self, kickoff: datetime) -> bool:
