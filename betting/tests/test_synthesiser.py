@@ -202,3 +202,13 @@ class TestThresholdGate:
         )
         result = synth(state)
         assert result["verdict"]["recommendation"] == "skip"
+
+    def test_skip_when_no_weights_configured(self):
+        synth = _make_synthesiser(weights={}, threshold=0.60)
+        state = _make_state(
+            statistical_signal=_make_signal(confidence=0.90, edge=0.15),
+        )
+        result = synth(state)
+        verdict = result["verdict"]
+        assert verdict["recommendation"] == "skip"
+        assert "no agent weights configured" in verdict["skip_reason"]

@@ -110,6 +110,7 @@ class MarketService:
         """
         CLV = model_implied_prob - (1 / pre_analysis_odds)
         Positive = you have edge over where market closed.
+        Reserved for future use when pre_analysis snapshot-based CLV is integrated.
         """
         if pre_analysis_odds <= 0:
             return 0.0

@@ -4,7 +4,7 @@ Runs via APScheduler on a daily cron schedule.
 """
 
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -32,7 +32,19 @@ configure_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 
 
-def _build_components():
+@dataclass
+class _Components:
+    odds_api: OddsApiProvider
+    csv_service: CsvDownloadService
+    ledger_repo: SqliteLedgerRepository
+    fixture_service: FixtureService
+    stats_provider: FootballDataProvider
+    league_loader: LeagueConfigLoader
+    active_leagues: list[str]
+    season: str
+
+
+def _build_components() -> _Components:
     """
     Constructs and returns shared adapters and services.
     Call once per job to get fresh instances with a warm cache.
@@ -62,7 +74,16 @@ def _build_components():
         csv_service=csv_service,
         league_loader=league_loader,
     )
-    return odds_api, csv_service, ledger_repo, fixture_service, stats_provider, league_loader, active_leagues, season
+    return _Components(
+        odds_api=odds_api,
+        csv_service=csv_service,
+        ledger_repo=ledger_repo,
+        fixture_service=fixture_service,
+        stats_provider=stats_provider,
+        league_loader=league_loader,
+        active_leagues=active_leagues,
+        season=season,
+    )
 
 
 def download_season_data(
@@ -107,24 +128,22 @@ def run_snapshot_job(
 def run_analysis() -> None:
     logger.info("Analysis run started")
 
-    odds_api, csv_service, ledger_repo, fixture_service, stats_provider, league_loader, active_leagues, season = (
-        _build_components()
-    )
+    c = _build_components()
 
     # Pre-download CSVs
-    download_season_data(csv_service, active_leagues, season)
+    download_season_data(c.csv_service, c.active_leagues, c.season)
 
     # Pre-analysis snapshot
-    run_snapshot_job(odds_api, fixture_service, ledger_repo, "pre_analysis")
+    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "pre_analysis")
 
     # Services
-    statistical_service = StatisticalService(stats_provider=stats_provider)
-    market_service = MarketService(ledger_repo=ledger_repo)
-    ledger_service = LedgerService(repository=ledger_repo)
+    statistical_service = StatisticalService(stats_provider=c.stats_provider)
+    market_service = MarketService(ledger_repo=c.ledger_repo)
+    ledger_service = LedgerService(repository=c.ledger_repo)
 
     # Graph
     pipeline = build_pipeline(
-        ingest_node=IngestNode(fixture_service),
+        ingest_node=IngestNode(c.fixture_service),
         statistical_node=StatisticalNode(statistical_service),
         market_node=MarketNode(market_service),
         synthesiser_node=SynthesiserNode(
@@ -135,7 +154,7 @@ def run_analysis() -> None:
     )
 
     # Run
-    eligible = fixture_service.get_eligible_fixtures(markets=["double_chance"])
+    eligible = c.fixture_service.get_eligible_fixtures(markets=["double_chance"])
     logger.info("Found %d eligible fixture(s)", len(eligible))
 
     for fixture, odds in eligible:
@@ -163,24 +182,24 @@ def run_analysis() -> None:
     logger.info("Analysis run completed")
 
 
+def _run_snapshot_from_fresh(snapshot_type: str) -> None:
+    """Builds fresh components and runs a snapshot job. Used by cron lambdas."""
+    c = _build_components()
+    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, snapshot_type)
+
+
 if __name__ == "__main__":
     scheduler = BlockingScheduler()
 
     # 08:00 — opening snapshot
     scheduler.add_job(
-        lambda: run_snapshot_job(
-            *_build_components()[:3],
-            "opening",
-        ),
+        lambda: _run_snapshot_from_fresh("opening"),
         "cron", hour=8, minute=0,
     )
 
     # 12:00 — intermediate snapshot
     scheduler.add_job(
-        lambda: run_snapshot_job(
-            *_build_components()[:3],
-            "intermediate",
-        ),
+        lambda: _run_snapshot_from_fresh("intermediate"),
         "cron", hour=12, minute=0,
     )
 

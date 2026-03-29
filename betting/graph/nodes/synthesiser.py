@@ -56,7 +56,18 @@ class SynthesiserNode:
             self._weights.get(s.agent_id, 0.0) for s in signals
         )
         if total_weight == 0:
-            total_weight = 1.0  # guard against zero division
+            # No weights configured for any active agent — treat as unweightable
+            verdict = Verdict(
+                fixture_id=state["fixture"]["id"],
+                market=state["markets"][0],
+                recommendation="skip",
+                consensus_confidence=0.0,
+                expected_value=0.0,
+                signals_used=len(signals),
+                synthesised_at=datetime.now(tz=timezone.utc),
+                skip_reason="no agent weights configured",
+            )
+            return {"verdict": asdict(verdict)}
 
         weighted_confidence = sum(
             s.confidence * self._weights.get(s.agent_id, 0.0)
