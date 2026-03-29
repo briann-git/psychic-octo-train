@@ -1,0 +1,39 @@
+from dataclasses import asdict
+from datetime import datetime, timezone
+
+from betting.graph.state import BettingState
+from betting.models.verdict import Verdict
+from betting.services.ledger_service import LedgerService
+
+
+class LedgerNode:
+    def __init__(self, ledger_service: LedgerService) -> None:
+        self._service = ledger_service
+
+    def __call__(self, state: BettingState) -> dict:
+        # Ensure a verdict is present — if the pipeline short-circuited (e.g.
+        # ineligible fixture bypassed the synthesiser), create a skip verdict here.
+        working_state = dict(state)
+        if not working_state.get("verdict"):
+            errors = list(working_state.get("errors", []))
+            skip_reason = errors[0] if errors else "ineligible fixture"
+            stub_verdict = Verdict(
+                fixture_id=working_state["fixture"]["id"],
+                market=(working_state.get("markets") or ["double_chance"])[0],
+                recommendation="skip",
+                consensus_confidence=0.0,
+                expected_value=0.0,
+                signals_used=0,
+                synthesised_at=datetime.now(tz=timezone.utc),
+                skip_reason=skip_reason,
+            )
+            working_state["verdict"] = asdict(stub_verdict)
+
+        try:
+            self._service.record(working_state)  # type: ignore[arg-type]
+            return {"recorded": True, "verdict": working_state["verdict"]}
+        except Exception as exc:
+            return {
+                "recorded": False,
+                "errors": list(state.get("errors", [])) + [f"ledger: {exc}"],
+            }
