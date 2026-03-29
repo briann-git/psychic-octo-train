@@ -108,7 +108,7 @@ class TestDownload:
     def test_raises_for_unsupported_league(self, cache_dir):
         service = _make_service(cache_dir)
 
-        with pytest.raises(ValueError, match="not in LEAGUE_CODES"):
+        with pytest.raises(ValueError, match="not supported"):
             service.get("UnknownLeague", "2024/25")
 
     def test_uses_correct_url(self, cache_dir):

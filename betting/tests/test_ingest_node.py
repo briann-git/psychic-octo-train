@@ -42,6 +42,7 @@ def _make_state(**overrides) -> BettingState:
         "odds_snapshot": _odds_dict(),
         "eligible": True,
         "statistical_signal": None,
+        "market_signal": None,
         "verdict": None,
         "recorded": False,
         "errors": [],

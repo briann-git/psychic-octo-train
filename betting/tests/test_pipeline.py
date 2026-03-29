@@ -11,6 +11,7 @@ import pytest
 from betting.adapters.sqlite_ledger import SqliteLedgerRepository
 from betting.graph.nodes.ingest import IngestNode
 from betting.graph.nodes.ledger import LedgerNode
+from betting.graph.nodes.market import MarketNode
 from betting.graph.nodes.statistical import StatisticalNode
 from betting.graph.nodes.synthesiser import SynthesiserNode
 from betting.graph.pipeline import build_pipeline
@@ -20,6 +21,7 @@ from betting.models.fixture import Fixture
 from betting.models.odds import OddsSnapshot
 from betting.services.fixture_service import FixtureService
 from betting.services.ledger_service import LedgerService
+from betting.services.market_service import MarketService
 from betting.services.statistical_service import StatisticalService
 
 
@@ -60,6 +62,11 @@ def _make_stats_provider(
     return provider
 
 
+def _make_market_node(ledger_repo: SqliteLedgerRepository) -> MarketNode:
+    market_service = MarketService(ledger_repo=ledger_repo)
+    return MarketNode(market_service=market_service)
+
+
 @pytest.fixture()
 def db_path(tmp_path):
     return str(tmp_path / "test_ledger.db")
@@ -75,7 +82,11 @@ def pipeline(db_path):
     return build_pipeline(
         ingest_node=IngestNode(fixture_service),
         statistical_node=StatisticalNode(statistical_service),
-        synthesiser_node=SynthesiserNode(),
+        market_node=_make_market_node(ledger_repo),
+        synthesiser_node=SynthesiserNode(
+            weights={"statistical": 0.60, "market": 0.40},
+            confidence_threshold=0.60,
+        ),
         ledger_node=LedgerNode(ledger_service),
     ), ledger_repo
 
@@ -92,6 +103,7 @@ class TestPipelineEndToEnd:
             "odds_snapshot": asdict(odds),
             "eligible": True,
             "statistical_signal": None,
+            "market_signal": None,
             "verdict": None,
             "recorded": False,
             "errors": [],
@@ -116,6 +128,7 @@ class TestPipelineEndToEnd:
             "odds_snapshot": asdict(odds),
             "eligible": False,  # pre-marked ineligible
             "statistical_signal": None,
+            "market_signal": None,
             "verdict": None,
             "recorded": False,
             "errors": [],
@@ -137,6 +150,7 @@ class TestPipelineEndToEnd:
             "odds_snapshot": asdict(odds),
             "eligible": True,
             "statistical_signal": None,
+            "market_signal": None,
             "verdict": None,
             "recorded": False,
             "errors": [],
@@ -158,6 +172,7 @@ class TestPipelineEndToEnd:
             "odds_snapshot": asdict(odds),
             "eligible": True,
             "statistical_signal": None,
+            "market_signal": None,
             "verdict": None,
             "recorded": False,
             "errors": [],
@@ -180,6 +195,7 @@ class TestPipelineEndToEnd:
             "odds_snapshot": asdict(odds),
             "eligible": True,
             "statistical_signal": None,
+            "market_signal": None,
             "verdict": None,
             "recorded": False,
             "errors": [],

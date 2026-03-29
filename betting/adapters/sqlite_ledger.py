@@ -39,6 +39,25 @@ CREATE TABLE IF NOT EXISTS skips (
     errors          TEXT,
     recorded_at     TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS odds_history (
+    id              TEXT PRIMARY KEY,
+    fixture_id      TEXT NOT NULL,
+    league          TEXT NOT NULL,
+    home_team       TEXT NOT NULL,
+    away_team       TEXT NOT NULL,
+    kickoff         TEXT NOT NULL,
+    market          TEXT NOT NULL,
+    bookmaker       TEXT NOT NULL,
+    home_draw       REAL NOT NULL,
+    home_away       REAL NOT NULL,
+    draw_away       REAL NOT NULL,
+    snapshot_type   TEXT NOT NULL,
+    fetched_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_odds_history_fixture
+    ON odds_history (fixture_id, fetched_at);
 """
 
 _ODDS_COLUMN = {
@@ -158,3 +177,56 @@ class SqliteLedgerRepository(ILedgerRepository):
                     datetime.now(tz=timezone.utc).isoformat(),
                 ),
             )
+
+    def save_odds_snapshot(
+        self,
+        fixture: Fixture,
+        odds: OddsSnapshot,
+        snapshot_type: str,
+    ) -> None:
+        """
+        Persists an odds snapshot to odds_history.
+        Skips if a row already exists for fixture_id + snapshot_type.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT id FROM odds_history WHERE fixture_id = ? AND snapshot_type = ?",
+                (fixture.id, snapshot_type),
+            )
+            if cursor.fetchone() is not None:
+                return
+
+            conn.execute(
+                """
+                INSERT INTO odds_history
+                (id, fixture_id, league, home_team, away_team, kickoff,
+                 market, bookmaker, home_draw, home_away, draw_away,
+                 snapshot_type, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    fixture.id,
+                    fixture.league,
+                    fixture.home_team,
+                    fixture.away_team,
+                    fixture.kickoff.isoformat(),
+                    odds.market,
+                    odds.bookmaker,
+                    odds.home_draw,
+                    odds.home_away,
+                    odds.draw_away,
+                    snapshot_type,
+                    datetime.now(tz=timezone.utc).isoformat(),
+                ),
+            )
+
+    def get_odds_history(self, fixture_id: str) -> list[dict]:
+        """Returns all rows for fixture ordered by fetched_at ascending."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM odds_history WHERE fixture_id = ? ORDER BY fetched_at ASC",
+                (fixture_id,),
+            )
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
