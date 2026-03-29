@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     max_lead_hours: int = 48
     flat_stake: float = 10.0
     log_level: str = "INFO"
+    csv_cache_dir: str = ".csv_cache"
+    csv_max_age_hours: int = 24
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

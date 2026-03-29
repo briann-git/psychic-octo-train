@@ -14,3 +14,10 @@ class Verdict:
     synthesised_at: datetime
     selection: str = ""         # "1X" | "12" | "X2" — populated when recommendation == "back"
     skip_reason: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Verdict":
+        d = dict(data)
+        if isinstance(d.get("synthesised_at"), str):
+            d["synthesised_at"] = datetime.fromisoformat(d["synthesised_at"])
+        return cls(**d)
