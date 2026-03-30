@@ -7,9 +7,7 @@ class OddsSnapshot:
     fixture_id: str
     market: str
     bookmaker: str
-    home_draw: float   # 1X odds
-    home_away: float   # 12 odds
-    draw_away: float   # X2 odds
+    selections: dict[str, float]    # selection_id -> decimal odds
     fetched_at: datetime
 
     @classmethod

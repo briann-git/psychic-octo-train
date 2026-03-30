@@ -12,6 +12,7 @@ from betting.adapters.football_data import FootballDataProvider
 from betting.adapters.odds_api import OddsApiProvider
 from betting.adapters.sqlite_ledger import SqliteLedgerRepository
 from betting.config.league_config import LeagueConfigLoader
+from betting.config.market_config import MarketConfigLoader
 from betting.logging_config import configure_logging
 from betting.config import settings
 from betting.graph.nodes.ingest import IngestNode
@@ -43,6 +44,7 @@ class _Components:
     fixture_service: FixtureService
     stats_provider: FootballDataProvider
     league_loader: LeagueConfigLoader
+    market_loader: MarketConfigLoader
     active_leagues: list[str]
     season: str
 
@@ -53,10 +55,15 @@ def _build_components() -> _Components:
     Call once per job to get fresh instances with a warm cache.
     """
     league_loader = LeagueConfigLoader()
+    market_loader = MarketConfigLoader()
     active_leagues = [l.id for l in league_loader.active_leagues()]
     season = current_season()
 
-    odds_api = OddsApiProvider(api_key=settings.odds_api_key, league_loader=league_loader)
+    odds_api = OddsApiProvider(
+        api_key=settings.odds_api_key,
+        league_loader=league_loader,
+        market_loader=market_loader,
+    )
     csv_service = CsvDownloadService(
         cache_dir=settings.csv_cache_dir,
         max_age_hours=settings.csv_max_age_hours,
@@ -84,6 +91,7 @@ def _build_components() -> _Components:
         fixture_service=fixture_service,
         stats_provider=stats_provider,
         league_loader=league_loader,
+        market_loader=market_loader,
         active_leagues=active_leagues,
         season=season,
     )
@@ -113,12 +121,15 @@ def run_snapshot_job(
     fixture_service: FixtureService,
     ledger_repo: SqliteLedgerRepository,
     snapshot_type: str,
+    market_loader: MarketConfigLoader | None = None,
 ) -> None:
     """
     Fetches current odds for all eligible fixtures and persists to odds_history.
     snapshot_type: "opening" | "intermediate" | "pre_analysis"
     """
-    eligible = fixture_service.get_eligible_fixtures(markets=["double_chance"])
+    loader = market_loader or MarketConfigLoader()
+    active_market_ids = [m.id for m in loader.active_markets()]
+    eligible = fixture_service.get_eligible_fixtures(markets=active_market_ids)
     logger.info("Snapshot job (%s): %d fixture(s)", snapshot_type, len(eligible))
 
     for fixture, odds in eligible:
@@ -160,6 +171,8 @@ def run_morning_job() -> None:
     result_service = ResultIngestionService(
         odds_api=c.odds_api,
         ledger_repo=c.ledger_repo,
+        market_loader=c.market_loader,
+        csv_service=c.csv_service,
     )
     settlement = result_service.settle_pending_picks(c.active_leagues)
     logger.info(
@@ -169,7 +182,7 @@ def run_morning_job() -> None:
     )
 
     # 2. Opening snapshot
-    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "opening")
+    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "opening", c.market_loader)
     logger.info("Morning job completed")
 
 
@@ -182,11 +195,17 @@ def run_analysis() -> None:
     download_season_data(c.csv_service, c.active_leagues, c.season)
 
     # Pre-analysis snapshot
-    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "pre_analysis")
+    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "pre_analysis", c.market_loader)
 
     # Services
-    statistical_service = StatisticalService(stats_provider=c.stats_provider)
-    market_service = MarketService(ledger_repo=c.ledger_repo)
+    statistical_service = StatisticalService(
+        stats_provider=c.stats_provider,
+        market_loader=c.market_loader,
+    )
+    market_service = MarketService(
+        ledger_repo=c.ledger_repo,
+        market_loader=c.market_loader,
+    )
     ledger_service = LedgerService(repository=c.ledger_repo)
 
     # Graph
@@ -202,7 +221,8 @@ def run_analysis() -> None:
     )
 
     # Run
-    eligible = c.fixture_service.get_eligible_fixtures(markets=["double_chance"])
+    active_market_ids = [m.id for m in c.market_loader.active_markets()]
+    eligible = c.fixture_service.get_eligible_fixtures(markets=active_market_ids)
     logger.info("Found %d eligible fixture(s)", len(eligible))
 
     for fixture, odds in eligible:
@@ -213,7 +233,7 @@ def run_analysis() -> None:
         )
         initial_state: BettingState = {
             "fixture": asdict(fixture),
-            "markets": ["double_chance"],
+            "markets": active_market_ids,
             "odds_snapshot": asdict(odds),
             "eligible": True,
             "statistical_signal": None,
@@ -252,7 +272,7 @@ def run_analysis() -> None:
 def _run_snapshot_from_fresh(snapshot_type: str) -> None:
     """Builds fresh components and runs a snapshot job. Used by cron lambdas."""
     c = _build_components()
-    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, snapshot_type)
+    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, snapshot_type, c.market_loader)
 
 
 def main() -> None:

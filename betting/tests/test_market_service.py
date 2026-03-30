@@ -33,9 +33,7 @@ def _make_odds(home_draw: float = 1.50, home_away: float = 1.40, draw_away: floa
         fixture_id="fix-mkt-001",
         market="double_chance",
         bookmaker="stub",
-        home_draw=home_draw,
-        home_away=home_away,
-        draw_away=draw_away,
+        selections={"1X": home_draw, "12": home_away, "X2": draw_away},
         fetched_at=datetime.now(tz=timezone.utc),
     )
 
@@ -55,9 +53,7 @@ def _make_history_row(
         "kickoff": "2025-04-01T15:00:00+00:00",
         "market": "double_chance",
         "bookmaker": "stub",
-        "home_draw": home_draw,
-        "home_away": home_away,
-        "draw_away": draw_away,
+        "selections": {"1X": home_draw, "12": home_away, "X2": draw_away},
         "snapshot_type": snapshot_type,
         "fetched_at": "2025-04-01T08:00:00+00:00",
     }

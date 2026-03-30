@@ -1,12 +1,15 @@
 """Result ingestion service — fetches completed match results from The Odds API
 and settles pending picks in the ledger."""
 
+import csv
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from betting.adapters.odds_api import OddsApiProvider
+from betting.config.market_config import MarketConfigLoader
 from betting.interfaces.ledger_repository import ILedgerRepository
+from betting.markets.evaluator import OutcomeEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +28,16 @@ class ResultIngestionService:
         self,
         odds_api: OddsApiProvider,
         ledger_repo: ILedgerRepository,
+        market_loader: MarketConfigLoader | None = None,
+        csv_service=None,
         settlement_lag_hours: int = 12,
     ) -> None:
         self._odds_api = odds_api
         self._ledger = ledger_repo
+        self._market_loader = market_loader or MarketConfigLoader()
+        self._csv_service = csv_service
         self._settlement_lag_hours = settlement_lag_hours
+        self._evaluator = OutcomeEvaluator()
 
     def settle_pending_picks(
         self, leagues: list[str]
@@ -72,7 +80,7 @@ class ResultIngestionService:
                 summary.still_pending += 1
                 continue
 
-            outcome = self._determine_outcome(pick["selection"], result)
+            outcome = self._determine_outcome(pick["selection"], pick.get("market", "double_chance"), result)
             self._ledger.settle_pick(pick["id"], outcome)
 
             summary.settled += 1
@@ -87,19 +95,69 @@ class ResultIngestionService:
 
     def _load_results(self, leagues: list[str]) -> dict[tuple[str, str], dict]:
         """
-        Fetches completed results for all leagues.
-        Returns dict keyed by (home_team, away_team) -> {ftr}.
+        Routes settlement data fetching by market settlement_source.
+        Merges API and CSV results into a single dict keyed by (home_team, away_team).
+        Result dicts carry all available fields: ftr, fthg, ftag, hy, ay, hr, ar.
         """
+        active = self._market_loader.active_markets()
+        needs_api = any(m.settlement_source == "api" for m in active)
+        needs_csv = any(m.settlement_source == "csv" for m in active)
+
+        results: dict[tuple[str, str], dict] = {}
+
+        if needs_api:
+            api_results = self._load_from_api(leagues)
+            for key, val in api_results.items():
+                results.setdefault(key, {}).update(val)
+
+        if needs_csv and self._csv_service:
+            csv_results = self._load_from_csv(leagues)
+            for key, val in csv_results.items():
+                results.setdefault(key, {}).update(val)
+        elif needs_csv and not self._csv_service:
+            logger.error("CSV settlement required but no CsvDownloadService injected")
+
+        return results
+
+    def _load_from_api(self, leagues: list[str]) -> dict[tuple[str, str], dict]:
         results: dict[tuple[str, str], dict] = {}
         for league in leagues:
             try:
                 events = self._odds_api.fetch_results(league, days_from=2)
                 for event in events:
                     ftr = self._ftr_from_scores(event)
+                    scores = {s["name"]: int(s["score"]) for s in event.get("scores", [])}
+                    fthg = scores.get(event["home_team"], 0)
+                    ftag = scores.get(event["away_team"], 0)
                     key = (event["home_team"], event["away_team"])
-                    results[key] = {"ftr": ftr}
+                    results[key] = {"ftr": ftr, "fthg": fthg, "ftag": ftag}
             except Exception as exc:
                 logger.error("Failed to fetch results for %s: %s", league, exc)
+        return results
+
+    def _load_from_csv(self, leagues: list[str]) -> dict[tuple[str, str], dict]:
+        results: dict[tuple[str, str], dict] = {}
+        for league in leagues:
+            try:
+                csv_path = self._csv_service.get(league, "")
+                with open(csv_path, encoding="utf-8-sig", newline="") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if not row.get("FTHG"):
+                            continue
+                        home = row.get("HomeTeam", "").strip()
+                        away = row.get("AwayTeam", "").strip()
+                        if not home or not away:
+                            continue
+                        key = (home, away)
+                        results[key] = {
+                            "hy": row.get("HY"),
+                            "ay": row.get("AY"),
+                            "hr": row.get("HR"),
+                            "ar": row.get("AR"),
+                        }
+            except Exception as exc:
+                logger.error("Failed to load CSV results for %s: %s", league, exc)
         return results
 
     def _ftr_from_scores(self, event: dict) -> str:
@@ -112,25 +170,15 @@ class ResultIngestionService:
             return "A"
         return "D"
 
-    def _determine_outcome(self, selection: str, result: dict) -> str:
+    def _determine_outcome(self, selection_id: str, market_id: str, result: dict) -> str:
         """
-        Maps selection + FTR to won/lost/void.
-
-        DC outcomes:
-          "1X" wins on H or D (FTR in ["H", "D"])
-          "12" wins on H or A (FTR in ["H", "A"])
-          "X2" wins on D or A (FTR in ["D", "A"])
+        Delegates outcome evaluation to the OutcomeEvaluator via MarketConfigLoader.
         """
-        ftr = result.get("ftr", "")
-        if not ftr:
+        selection = self._market_loader.get_selection(market_id, selection_id)
+        if not selection:
+            logger.warning(
+                "Selection %r not found in market %r — voiding pick",
+                selection_id, market_id,
+            )
             return "void"
-
-        winning_ftrs = {
-            "1X": {"H", "D"},
-            "12": {"H", "A"},
-            "X2": {"D", "A"},
-        }
-        if selection not in winning_ftrs:
-            return "void"
-
-        return "won" if ftr in winning_ftrs[selection] else "lost"
+        return self._evaluator.evaluate(selection, result)

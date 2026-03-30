@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS skips (
     recorded_at     TEXT NOT NULL
 );
 
+DROP TABLE IF EXISTS odds_history;
+
 CREATE TABLE IF NOT EXISTS odds_history (
     id              TEXT PRIMARY KEY,
     fixture_id      TEXT NOT NULL,
@@ -51,9 +53,7 @@ CREATE TABLE IF NOT EXISTS odds_history (
     kickoff         TEXT NOT NULL,
     market          TEXT NOT NULL,
     bookmaker       TEXT NOT NULL,
-    home_draw       REAL NOT NULL,
-    home_away       REAL NOT NULL,
-    draw_away       REAL NOT NULL,
+    selections_json TEXT NOT NULL,
     snapshot_type   TEXT NOT NULL,
     fetched_at      TEXT NOT NULL
 );
@@ -66,13 +66,6 @@ _MIGRATION_ADD_SETTLEMENT_COLUMNS = """
 ALTER TABLE picks ADD COLUMN outcome TEXT;
 ALTER TABLE picks ADD COLUMN settled_at TEXT;
 """
-
-_ODDS_COLUMN = {
-    "1X": "home_draw",
-    "12": "home_away",
-    "X2": "draw_away",
-}
-
 
 class SqliteLedgerRepository(ILedgerRepository):
     def __init__(self, db_path: str, flat_stake: float = 10.0) -> None:
@@ -93,6 +86,8 @@ class SqliteLedgerRepository(ILedgerRepository):
             conn.execute("ALTER TABLE picks ADD COLUMN outcome TEXT")
         if "settled_at" not in columns:
             conn.execute("ALTER TABLE picks ADD COLUMN settled_at TEXT")
+        if "selection_odds" not in columns:
+            conn.execute("ALTER TABLE picks ADD COLUMN selection_odds REAL")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
@@ -134,16 +129,16 @@ class SqliteLedgerRepository(ILedgerRepository):
         verdict: Verdict,
     ) -> None:
         selection = verdict.selection
-        odds_col = _ODDS_COLUMN.get(selection, "home_draw")
-        odds_value = getattr(odds, odds_col, odds.home_draw)
+        selection_odds = odds.selections.get(selection, 0.0)
 
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO picks
                 (id, fixture_id, home_team, away_team, league, kickoff,
-                 market, selection, odds, stake, confidence, expected_value, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 market, selection, odds, stake, confidence, expected_value,
+                 recorded_at, selection_odds)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -154,11 +149,12 @@ class SqliteLedgerRepository(ILedgerRepository):
                     fixture.kickoff.isoformat(),
                     verdict.market,
                     selection,
-                    odds_value,
+                    selection_odds,
                     self._flat_stake,
                     verdict.consensus_confidence,
                     verdict.expected_value,
                     datetime.now(tz=timezone.utc).isoformat(),
+                    selection_odds,
                 ),
             )
 
@@ -213,13 +209,15 @@ class SqliteLedgerRepository(ILedgerRepository):
             if cursor.fetchone() is not None:
                 return
 
+            selections_json = json.dumps(odds.selections)
+
             conn.execute(
                 """
                 INSERT INTO odds_history
                 (id, fixture_id, league, home_team, away_team, kickoff,
-                 market, bookmaker, home_draw, home_away, draw_away,
+                 market, bookmaker, selections_json,
                  snapshot_type, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -230,9 +228,7 @@ class SqliteLedgerRepository(ILedgerRepository):
                     fixture.kickoff.isoformat(),
                     odds.market,
                     odds.bookmaker,
-                    odds.home_draw,
-                    odds.home_away,
-                    odds.draw_away,
+                    selections_json,
                     snapshot_type,
                     datetime.now(tz=timezone.utc).isoformat(),
                 ),
@@ -246,7 +242,13 @@ class SqliteLedgerRepository(ILedgerRepository):
                 (fixture_id,),
             )
             cols = [desc[0] for desc in cursor.description]
-            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+            rows = []
+            for row in cursor.fetchall():
+                d = dict(zip(cols, row))
+                if "selections_json" in d:
+                    d["selections"] = json.loads(d["selections_json"])
+                rows.append(d)
+            return rows
 
     def get_pending_picks(self) -> list[dict]:
         with self._connect() as conn:

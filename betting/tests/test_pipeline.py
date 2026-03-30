@@ -42,9 +42,7 @@ def _stub_odds() -> OddsSnapshot:
         fixture_id="fix-pipeline-001",
         market="double_chance",
         bookmaker="stub",
-        home_draw=1.80,
-        home_away=1.60,
-        draw_away=2.50,
+        selections={"1X": 1.80, "12": 1.60, "X2": 2.50},
         fetched_at=datetime.now(tz=timezone.utc),
     )
 

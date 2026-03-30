@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from betting.config.market_config import MarketConfigLoader
 from betting.interfaces.ledger_repository import ILedgerRepository
 from betting.models.fixture import Fixture
 from betting.models.odds import OddsSnapshot
@@ -23,8 +24,13 @@ class MovementSummary:
 
 
 class MarketService:
-    def __init__(self, ledger_repo: ILedgerRepository) -> None:
+    def __init__(
+        self,
+        ledger_repo: ILedgerRepository,
+        market_loader: MarketConfigLoader | None = None,
+    ) -> None:
         self._ledger = ledger_repo
+        self._market_loader = market_loader or MarketConfigLoader()
 
     def analyse(self, fixture: Fixture, current_odds: OddsSnapshot) -> Signal:
         """
@@ -59,9 +65,8 @@ class MarketService:
     def _best_selection(self, odds: OddsSnapshot) -> str:
         """Pick the selection with the best (highest) implied probability."""
         implied = {
-            "1X": 1.0 / odds.home_draw if odds.home_draw > 0 else 0.0,
-            "12": 1.0 / odds.home_away if odds.home_away > 0 else 0.0,
-            "X2": 1.0 / odds.draw_away if odds.draw_away > 0 else 0.0,
+            sel_id: (1.0 / price if price > 0 else 0.0)
+            for sel_id, price in odds.selections.items()
         }
         return max(implied, key=lambda s: implied[s])
 
@@ -72,11 +77,9 @@ class MarketService:
         current_odds: OddsSnapshot,
         snapshots_available: int,
     ) -> MovementSummary:
-        col_map = {"1X": "home_draw", "12": "home_away", "X2": "draw_away"}
-        col = col_map[selection]
-
-        opening_odds = float(opening_row[col])
-        current = getattr(current_odds, col)
+        opening_selections = opening_row.get("selections") or {}
+        opening_odds = float(opening_selections.get(selection, 0.0))
+        current = current_odds.selections.get(selection, 0.0)
         delta = current - opening_odds
 
         if delta < SHARP_THRESHOLD:

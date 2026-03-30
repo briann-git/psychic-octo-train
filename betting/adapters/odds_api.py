@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import httpx
 
 from betting.config.league_config import LeagueConfigLoader
+from betting.config.market_config import MarketConfigLoader, MarketDefinition
 from betting.interfaces.fixture_provider import IFixtureProvider
 from betting.interfaces.odds_provider import IOddsProvider
 from betting.models.fixture import Fixture
@@ -22,9 +23,11 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
         self,
         api_key: str,
         league_loader: LeagueConfigLoader | None = None,
+        market_loader: MarketConfigLoader | None = None,
     ) -> None:
         self._api_key = api_key
         self._league_loader = league_loader or LeagueConfigLoader()
+        self._market_loader = market_loader or MarketConfigLoader()
         self._cache: dict[str, list[dict]] = {}
 
     # ------------------------------------------------------------------
@@ -47,15 +50,22 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
     # IOddsProvider
     # ------------------------------------------------------------------
 
-    def fetch_odds(self, fixture: Fixture, markets: list[str]) -> OddsSnapshot | None:
+    def fetch_odds(
+        self, fixture: Fixture, markets: list[str]
+    ) -> OddsSnapshot | None:
         sport_key = self._league_loader.odds_api_key(fixture.league)
         if sport_key is None:
             logger.warning("League %r not in config — cannot fetch odds", fixture.league)
             return None
         events = self._fetch_events(sport_key)
-        for event in events:
-            if event["id"] == fixture.id:
-                return self._to_odds_snapshot(event, fixture.id)
+        event = next((e for e in events if e["id"] == fixture.id), None)
+        if not event:
+            return None
+
+        for market_id in markets:
+            snapshot = self._build_odds_snapshot(event, fixture.id, market_id)
+            if snapshot:
+                return snapshot
         return None
 
     # ------------------------------------------------------------------
@@ -67,14 +77,19 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             logger.info("Cache hit for sport key %r", sport_key)
             return self._cache[sport_key]
 
-        logger.info("Fetching events for sport key %r", sport_key)
+        market_keys = list({
+            m.odds_api_market_key
+            for m in self._market_loader.active_markets()
+        })
+
+        logger.info("Fetching events for sport key %r, markets %s", sport_key, market_keys)
         try:
             response = httpx.get(
                 f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
                 params={
                     "apiKey": self._api_key,
                     "regions": "eu",
-                    "markets": "h2h",
+                    "markets": ",".join(market_keys),
                     "oddsFormat": "decimal",
                 },
                 timeout=10,
@@ -106,29 +121,63 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             venue=None,
         )
 
-    def _to_odds_snapshot(self, event: dict, fixture_id: str) -> OddsSnapshot | None:
-        h2h = self._best_h2h(event)
-        if h2h is None:
-            logger.warning("No h2h market found for event %r", event.get("id"))
+    def _build_odds_snapshot(
+        self, event: dict, fixture_id: str, market_id: str
+    ) -> OddsSnapshot | None:
+        market = self._market_loader.get(market_id)
+        if not market:
+            logger.warning("Market %r not in registry", market_id)
             return None
 
-        home_team = event["home_team"]
-        away_team = event["away_team"]
-        home_win = h2h.get(home_team, 0.0)
-        away_win = h2h.get(away_team, 0.0)
-        draw = h2h.get("Draw", 0.0)
+        if market.derived:
+            return self._build_derived_snapshot(event, fixture_id, market)
+        else:
+            return self._build_direct_snapshot(event, fixture_id, market)
 
-        return OddsSnapshot(
-            fixture_id=fixture_id,
-            market="double_chance",
-            bookmaker=h2h["_bookmaker"],
-            home_draw=self._dc_odds(home_win, draw),
-            home_away=self._dc_odds(home_win, away_win),
-            draw_away=self._dc_odds(draw, away_win),
-            fetched_at=datetime.now(tz=timezone.utc),
-        )
+    def _build_derived_snapshot(
+        self, event: dict, fixture_id: str, market: MarketDefinition
+    ) -> OddsSnapshot | None:
+        source_prices = self._extract_source_prices(event, market.odds_api_market_key)
+        if not source_prices:
+            return None
 
-    def _best_h2h(self, event: dict) -> dict | None:
+        ftr_prices = self._map_to_ftr_prices(event, source_prices)
+
+        selection_odds: dict[str, float] = {}
+        for sel in market.selections:
+            codes = [c.strip() for c in sel.wins_if.split("|")]
+            component_odds = [
+                ftr_prices[code]
+                for code in codes
+                if code in ftr_prices
+            ]
+            if len(component_odds) != len(codes):
+                logger.warning(
+                    "Missing component odds for selection %r in market %r",
+                    sel.id, market.id,
+                )
+                return None
+            selection_odds[sel.id] = self._combine_implied(component_odds)
+
+        bookmaker = source_prices.get("_bookmaker", "unknown")
+        return self._to_odds_snapshot(fixture_id, market.id, selection_odds, bookmaker)
+
+    def _build_direct_snapshot(
+        self, event: dict, fixture_id: str, market: MarketDefinition
+    ) -> OddsSnapshot | None:
+        source_prices = self._extract_source_prices(event, market.odds_api_market_key)
+        if not source_prices:
+            return None
+
+        selection_odds: dict[str, float] = {}
+        for sel in market.selections:
+            price = source_prices.get(sel.label, 0.0)
+            selection_odds[sel.id] = price
+
+        bookmaker = source_prices.get("_bookmaker", "unknown")
+        return self._to_odds_snapshot(fixture_id, market.id, selection_odds, bookmaker)
+
+    def _extract_source_prices(self, event: dict, market_key: str) -> dict | None:
         bookmakers: list[dict] = event.get("bookmakers", [])
         if not bookmakers:
             return None
@@ -145,13 +194,35 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             selected = bookmakers[0]
 
         for market in selected.get("markets", []):
-            if market["key"] == "h2h":
+            if market["key"] == market_key:
                 parsed: dict = {"_bookmaker": selected["key"]}
                 for outcome in market.get("outcomes", []):
                     parsed[outcome["name"]] = outcome["price"]
                 return parsed
 
         return None
+
+    def _map_to_ftr_prices(self, event: dict, source_prices: dict) -> dict[str, float]:
+        return {
+            "H": source_prices.get(event["home_team"], 0.0),
+            "D": source_prices.get("Draw", 0.0),
+            "A": source_prices.get(event["away_team"], 0.0),
+        }
+
+    def _to_odds_snapshot(
+        self,
+        fixture_id: str,
+        market_id: str,
+        selection_odds: dict[str, float],
+        bookmaker: str,
+    ) -> OddsSnapshot:
+        return OddsSnapshot(
+            fixture_id=fixture_id,
+            market=market_id,
+            bookmaker=bookmaker,
+            selections=selection_odds,
+            fetched_at=datetime.now(tz=timezone.utc),
+        )
 
     def fetch_results(
         self,
@@ -187,12 +258,11 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
         return [e for e in response.json() if e.get("completed")]
 
     @staticmethod
-    def _dc_odds(p1: float, p2: float) -> float:
+    def _combine_implied(odds_list: list[float]) -> float:
         """
-        Derive double chance odds from two 1X2 decimal prices.
-        Adds implied probabilities, converts back to decimal odds.
-        Returns 0.0 if either input is non-positive.
+        Combines N decimal odds by adding implied probabilities.
+        Returns 0.0 if any input is non-positive.
         """
-        if p1 <= 0 or p2 <= 0:
+        if any(o <= 0 for o in odds_list):
             return 0.0
-        return round(1.0 / (1.0 / p1 + 1.0 / p2), 4)
+        return round(1.0 / sum(1.0 / o for o in odds_list), 4)

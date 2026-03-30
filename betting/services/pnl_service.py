@@ -49,7 +49,8 @@ class PnlService:
                 if outcome == "won":
                     won += 1
                     total_staked += pick.get("stake", 0.0)
-                    gross_return += pick.get("odds", 0.0) * pick.get("stake", 0.0)
+                    odds_value = pick.get("selection_odds") or pick.get("odds", 0.0)
+                    gross_return += odds_value * pick.get("stake", 0.0)
                 elif outcome == "lost":
                     lost += 1
                     total_staked += pick.get("stake", 0.0)

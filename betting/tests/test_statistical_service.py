@@ -28,9 +28,7 @@ def _make_odds(home_draw: float = 1.40, home_away: float = 1.25, draw_away: floa
         fixture_id="fix-001",
         market="double_chance",
         bookmaker="stub",
-        home_draw=home_draw,
-        home_away=home_away,
-        draw_away=draw_away,
+        selections={"1X": home_draw, "12": home_away, "X2": draw_away},
         fetched_at=datetime.now(tz=timezone.utc),
     )
 
@@ -48,7 +46,8 @@ def _make_service(
         home_attack, home_defence, away_attack, away_defence
     )
     provider.get_league_averages.return_value = (league_avg_home, league_avg_away)
-    return StatisticalService(stats_provider=provider)
+    from betting.config.market_config import MarketConfigLoader
+    return StatisticalService(stats_provider=provider, market_loader=MarketConfigLoader())
 
 
 class TestExpectedGoals:
