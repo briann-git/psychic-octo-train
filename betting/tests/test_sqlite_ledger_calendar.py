@@ -1,7 +1,5 @@
 """Tests for fixture_calendar table in SqliteLedgerRepository."""
 
-import os
-import tempfile
 from datetime import datetime, timedelta, timezone
 
 import pytest

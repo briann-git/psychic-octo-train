@@ -330,6 +330,7 @@ def _run_snapshot_from_fresh(snapshot_type: str) -> None:
     """Builds fresh components and runs a snapshot job. Used by cron lambdas."""
     c = _build_components()
     if not _has_fixtures_today(c):
+        logger.info("Snapshot job (%s) skipped — no fixtures today", snapshot_type)
         return
     run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, snapshot_type, c.market_loader)
 
