@@ -2,7 +2,7 @@
 
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -26,7 +26,7 @@ def _write_cache(service: CsvDownloadService, league: str, season: str, content:
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(content, encoding="utf-8")
     meta_path = dest.with_suffix(".meta")
-    meta_path.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
+    meta_path.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
     return dest
 
 

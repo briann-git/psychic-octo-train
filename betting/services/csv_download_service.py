@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -74,10 +74,11 @@ class CsvDownloadService:
         if not meta_path.exists():
             return True
         try:
-            download_time = datetime.fromisoformat(
-                meta_path.read_text(encoding="utf-8").strip()
-            )
-            age_seconds = (datetime.utcnow() - download_time).total_seconds()
+            raw = meta_path.read_text(encoding="utf-8").strip()
+            download_time = datetime.fromisoformat(raw)
+            if download_time.tzinfo is None:
+                download_time = download_time.replace(tzinfo=timezone.utc)
+            age_seconds = (datetime.now(timezone.utc) - download_time).total_seconds()
             return age_seconds > self._max_age_hours * 3600
         except (ValueError, OSError):
             return True
@@ -106,7 +107,7 @@ class CsvDownloadService:
                 f.write(response.content)
             os.replace(tmp_path, dest)
             meta_path = dest.with_suffix(".meta")
-            meta_path.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
+            meta_path.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
         except Exception:
             try:
                 os.unlink(tmp_path)
