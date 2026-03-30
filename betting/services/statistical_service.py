@@ -58,6 +58,9 @@ class StatisticalService:
         edges: dict[str, float] = {}
         model_probs: dict[str, float] = {}
 
+        # Currently only works for markets with FTR-based winning conditions
+        # (string wins_if like "H | D"). BTTS/total markets will need their
+        # own probability calculators — a known extension point.
         for sel in market.selections:
             codes = [c.strip() for c in sel.wins_if.split("|")] if isinstance(sel.wins_if, str) else []
             model_prob = sum(ftr_probs.get(code, 0.0) for code in codes)

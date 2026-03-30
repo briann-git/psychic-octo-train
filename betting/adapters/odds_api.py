@@ -145,6 +145,13 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
 
         selection_odds: dict[str, float] = {}
         for sel in market.selections:
+            # Derived markets must use string wins_if (pipe-separated FTR codes)
+            if not isinstance(sel.wins_if, str):
+                logger.warning(
+                    "Derived market %r selection %r has non-string wins_if — skipping",
+                    market.id, sel.id,
+                )
+                return None
             codes = [c.strip() for c in sel.wins_if.split("|")]
             component_odds = [
                 ftr_prices[code]

@@ -151,10 +151,10 @@ class ResultIngestionService:
                             continue
                         key = (home, away)
                         results[key] = {
-                            "hy": row.get("HY"),
-                            "ay": row.get("AY"),
-                            "hr": row.get("HR"),
-                            "ar": row.get("AR"),
+                            "hy": int(row["HY"]) if row.get("HY") else None,
+                            "ay": int(row["AY"]) if row.get("AY") else None,
+                            "hr": int(row["HR"]) if row.get("HR") else None,
+                            "ar": int(row["AR"]) if row.get("AR") else None,
                         }
             except Exception as exc:
                 logger.error("Failed to load CSV results for %s: %s", league, exc)
