@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-import time
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -67,11 +67,20 @@ class CsvDownloadService:
         return Path(self._cache_dir) / f"{league}_{season_code}.csv"
 
     def _is_stale(self, path: Path) -> bool:
-        """True if file does not exist or mtime is older than max_age_hours."""
+        """True if file does not exist or download timestamp is older than max_age_hours."""
         if not path.exists():
             return True
-        age_seconds = time.time() - path.stat().st_mtime
-        return age_seconds > self._max_age_hours * 3600
+        meta_path = path.with_suffix(".meta")
+        if not meta_path.exists():
+            return True
+        try:
+            download_time = datetime.fromisoformat(
+                meta_path.read_text(encoding="utf-8").strip()
+            )
+            age_seconds = (datetime.utcnow() - download_time).total_seconds()
+            return age_seconds > self._max_age_hours * 3600
+        except (ValueError, OSError):
+            return True
 
     def _download(self, league: str, season: str, dest: Path) -> None:
         """
@@ -96,6 +105,8 @@ class CsvDownloadService:
             with os.fdopen(fd, "wb") as f:
                 f.write(response.content)
             os.replace(tmp_path, dest)
+            meta_path = dest.with_suffix(".meta")
+            meta_path.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
         except Exception:
             try:
                 os.unlink(tmp_path)
