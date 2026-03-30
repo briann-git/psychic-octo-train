@@ -153,6 +153,39 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
 
         return None
 
+    def fetch_results(
+        self,
+        league: str,
+        days_from: int = 1,
+    ) -> list[dict]:
+        """
+        GET /v4/sports/{sport_key}/scores?daysFrom={days_from}
+        Returns completed matches only (completed=true).
+        """
+        sport_key = self._league_loader.odds_api_key(league)
+        if not sport_key:
+            logger.warning("League %r not in league config — cannot fetch results", league)
+            return []
+
+        try:
+            response = httpx.get(
+                f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores",
+                params={
+                    "apiKey": self._api_key,
+                    "daysFrom": days_from,
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "HTTP error fetching results for %s — status %s",
+                league, exc.response.status_code,
+            )
+            raise
+
+        return [e for e in response.json() if e.get("completed")]
+
     @staticmethod
     def _dc_odds(p1: float, p2: float) -> float:
         """

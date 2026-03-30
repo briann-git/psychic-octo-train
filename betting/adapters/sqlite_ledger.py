@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS picks (
     stake           REAL NOT NULL,
     confidence      REAL NOT NULL,
     expected_value  REAL NOT NULL,
-    recorded_at     TEXT NOT NULL
+    recorded_at     TEXT NOT NULL,
+    outcome         TEXT,
+    settled_at      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS skips (
@@ -60,6 +62,11 @@ CREATE INDEX IF NOT EXISTS idx_odds_history_fixture
     ON odds_history (fixture_id, fetched_at);
 """
 
+_MIGRATION_ADD_SETTLEMENT_COLUMNS = """
+ALTER TABLE picks ADD COLUMN outcome TEXT;
+ALTER TABLE picks ADD COLUMN settled_at TEXT;
+"""
+
 _ODDS_COLUMN = {
     "1X": "home_draw",
     "12": "home_away",
@@ -76,6 +83,16 @@ class SqliteLedgerRepository(ILedgerRepository):
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(_DDL)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Applies schema migrations guarded by column existence checks."""
+        cursor = conn.execute("PRAGMA table_info(picks)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "outcome" not in columns:
+            conn.execute("ALTER TABLE picks ADD COLUMN outcome TEXT")
+        if "settled_at" not in columns:
+            conn.execute("ALTER TABLE picks ADD COLUMN settled_at TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
@@ -228,5 +245,29 @@ class SqliteLedgerRepository(ILedgerRepository):
                 "SELECT * FROM odds_history WHERE fixture_id = ? ORDER BY fetched_at ASC",
                 (fixture_id,),
             )
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def get_pending_picks(self) -> list[dict]:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM picks WHERE outcome IS NULL"
+            )
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def settle_pick(self, pick_id: str, outcome: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE picks SET outcome = ?, settled_at = ?
+                WHERE id = ?
+                """,
+                (outcome, datetime.now(tz=timezone.utc).isoformat(), pick_id),
+            )
+
+    def get_all_picks(self) -> list[dict]:
+        with self._connect() as conn:
+            cursor = conn.execute("SELECT * FROM picks")
             cols = [desc[0] for desc in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]

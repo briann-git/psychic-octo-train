@@ -29,3 +29,18 @@ class ILedgerRepository(ABC):
     def get_odds_history(self, fixture_id: str) -> list[dict]:
         """Returns all rows for fixture ordered by fetched_at ascending."""
         ...
+
+    @abstractmethod
+    def get_pending_picks(self) -> list[dict]:
+        """Returns all picks where outcome IS NULL."""
+        ...
+
+    @abstractmethod
+    def settle_pick(self, pick_id: str, outcome: str) -> None:
+        """Sets outcome and settled_at for the given pick id."""
+        ...
+
+    @abstractmethod
+    def get_all_picks(self) -> list[dict]:
+        """Returns all picks regardless of outcome."""
+        ...

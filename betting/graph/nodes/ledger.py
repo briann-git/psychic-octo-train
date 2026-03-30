@@ -2,6 +2,7 @@ import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 
+from betting.config import settings
 from betting.graph.state import BettingState
 from betting.models.verdict import Verdict
 from betting.services.ledger_service import LedgerService
@@ -34,7 +35,22 @@ class LedgerNode:
 
         try:
             self._service.record(working_state)  # type: ignore[arg-type]
-            return {"recorded": True, "verdict": working_state["verdict"]}
+            result = {"recorded": True, "verdict": working_state["verdict"]}
+
+            if working_state.get("verdict") and settings.paper_trading:
+                verdict = working_state["verdict"]
+                if verdict.get("recommendation") == "back":
+                    logger.info(
+                        "[PAPER] Would back %s — %s vs %s, selection=%s, confidence=%.3f, edge=%.4f",
+                        verdict["fixture_id"],
+                        state["fixture"]["home_team"],
+                        state["fixture"]["away_team"],
+                        verdict.get("selection"),
+                        verdict.get("consensus_confidence", 0),
+                        verdict.get("expected_value", 0),
+                    )
+
+            return result
         except Exception as exc:
             logger.warning(
                 "LedgerNode error for fixture %s: %s",

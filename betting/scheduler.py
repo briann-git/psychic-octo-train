@@ -21,10 +21,13 @@ from betting.graph.nodes.statistical import StatisticalNode
 from betting.graph.nodes.synthesiser import SynthesiserNode
 from betting.graph.pipeline import build_pipeline
 from betting.graph.state import BettingState
+from betting.services.backup_service import BackupService
 from betting.services.csv_download_service import CsvDownloadService
 from betting.services.fixture_service import FixtureService
 from betting.services.ledger_service import LedgerService
 from betting.services.market_service import MarketService
+from betting.services.pnl_service import PnlService
+from betting.services.result_ingestion_service import ResultIngestionService
 from betting.services.statistical_service import StatisticalService
 from betting.utils import current_season
 
@@ -119,10 +122,55 @@ def run_snapshot_job(
     logger.info("Snapshot job (%s): %d fixture(s)", snapshot_type, len(eligible))
 
     for fixture, odds in eligible:
+        effective_type = snapshot_type
+        if snapshot_type == "opening":
+            history = ledger_repo.get_odds_history(fixture.id)
+            if any(r["snapshot_type"] == "opening" for r in history):
+                effective_type = "intermediate"
         try:
-            ledger_repo.save_odds_snapshot(fixture, odds, snapshot_type)
+            ledger_repo.save_odds_snapshot(fixture, odds, effective_type)
         except Exception as exc:
             logger.error("Snapshot write failed for %s: %s", fixture.id, exc)
+
+
+def run_backup_job() -> None:
+    logger.info("Backup job started")
+    backup_service = BackupService(
+        db_path=settings.db_path,
+        backup_dir=settings.backup_dir,
+        oci_namespace=settings.oci_namespace,
+        oci_bucket=settings.oci_bucket,
+        local_retention_days=settings.backup_local_retention_days,
+        remote_retention_days=settings.backup_remote_retention_days,
+    )
+    try:
+        backup_service.run()
+        logger.info("Backup job completed")
+    except Exception as exc:
+        logger.error("Backup job failed: %s", exc)
+        # Non-fatal — do not raise, morning job must still run
+
+
+def run_morning_job() -> None:
+    """08:00 — settle yesterday's results, then take opening snapshot."""
+    logger.info("Morning job started")
+    c = _build_components()
+
+    # 1. Settle pending picks from Odds API
+    result_service = ResultIngestionService(
+        odds_api=c.odds_api,
+        ledger_repo=c.ledger_repo,
+    )
+    settlement = result_service.settle_pending_picks(c.active_leagues)
+    logger.info(
+        "Settlement complete — settled: %d, won: %d, lost: %d, void: %d, still_pending: %d",
+        settlement.settled, settlement.won, settlement.lost,
+        settlement.void, settlement.still_pending,
+    )
+
+    # 2. Opening snapshot
+    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "opening")
+    logger.info("Morning job completed")
 
 
 def run_analysis() -> None:
@@ -179,6 +227,25 @@ def run_analysis() -> None:
         except Exception as exc:
             logger.error("Unhandled error for fixture %s: %s", fixture.id, exc)
 
+    # P&L summary
+    pnl_service = PnlService(ledger_repo=c.ledger_repo)
+    summary = pnl_service.compute()
+    logger.info(
+        "P&L summary — picks: %d (settled: %d, pending: %d) | "
+        "won: %d lost: %d void: %d | "
+        "win_rate: %.1f%% | staked: %.2f | net: %.2f | ROI: %.1f%%",
+        summary.total_picks,
+        summary.settled,
+        summary.pending,
+        summary.won,
+        summary.lost,
+        summary.void,
+        summary.win_rate * 100,
+        summary.total_staked,
+        summary.net_pnl,
+        summary.roi * 100,
+    )
+
     logger.info("Analysis run completed")
 
 
@@ -188,22 +255,17 @@ def _run_snapshot_from_fresh(snapshot_type: str) -> None:
     run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, snapshot_type)
 
 
-if __name__ == "__main__":
+def main() -> None:
     scheduler = BlockingScheduler()
-
-    # 08:00 — opening snapshot
-    scheduler.add_job(
-        lambda: _run_snapshot_from_fresh("opening"),
-        "cron", hour=8, minute=0,
-    )
-
-    # 12:00 — intermediate snapshot
+    scheduler.add_job(run_backup_job, "cron", hour=4, minute=0)
+    scheduler.add_job(run_morning_job, "cron", hour=8, minute=0)
     scheduler.add_job(
         lambda: _run_snapshot_from_fresh("intermediate"),
         "cron", hour=12, minute=0,
     )
-
-    # 16:00 — pre-analysis snapshot, then full pipeline
     scheduler.add_job(run_analysis, "cron", hour=16, minute=0)
-
     scheduler.start()
+
+
+if __name__ == "__main__":
+    main()
