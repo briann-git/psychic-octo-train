@@ -270,7 +270,8 @@ def run_analysis() -> None:
     logger.info(
         "P&L summary — picks: %d (settled: %d, pending: %d) | "
         "won: %d lost: %d void: %d | "
-        "win_rate: %.1f%% | staked: %.2f | net: %.2f | ROI: %.1f%%",
+        "win_rate: %.1f%% | staked: %.2f | net: %.2f | ROI: %.1f%% | "
+        "CLV: %s",
         summary.total_picks,
         summary.settled,
         summary.pending,
@@ -281,7 +282,28 @@ def run_analysis() -> None:
         summary.total_staked,
         summary.net_pnl,
         summary.roi * 100,
+        f"{summary.clv_average:+.4f}" if summary.clv_average is not None else "n/a",
     )
+
+    if summary.skip_reasons:
+        logger.info(
+            "Skips today — total: %d | %s",
+            summary.total_skips,
+            " | ".join(f"{k}: {v}" for k, v in sorted(summary.skip_reasons.items())),
+        )
+
+    if summary.calibration_buckets:
+        logger.info("Confidence calibration (settled picks):")
+        for bucket in summary.calibration_buckets:
+            win_rate_str = (
+                f"{bucket['win_rate'] * 100:.1f}%"
+                if bucket["win_rate"] is not None
+                else "n/a"
+            )
+            logger.info(
+                "  %s: %d picks, %d won (%s)",
+                bucket["range"], bucket["picks"], bucket["won"], win_rate_str,
+            )
 
     logger.info("Analysis run completed")
 

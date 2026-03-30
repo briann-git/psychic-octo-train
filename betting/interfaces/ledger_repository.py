@@ -47,6 +47,24 @@ class ILedgerRepository(ABC):
         ...
 
     @abstractmethod
+    def get_all_skips(self) -> list[dict]:
+        """Returns all rows from the skips table."""
+        ...
+
+    @abstractmethod
+    def record_pick_signals(
+        self,
+        pick_id: str,
+        signals: list[dict],
+    ) -> None:
+        """
+        Persists agent signals for a given pick.
+        Each dict in signals is a serialised Signal.
+        Only called when recommendation == "back".
+        """
+        ...
+
+    @abstractmethod
     def upsert_fixture_calendar(self, fixtures: list["Fixture"]) -> None:
         """
         Inserts or replaces fixtures in the calendar.

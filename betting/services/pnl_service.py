@@ -1,11 +1,18 @@
 """P&L summary service — computes profit and loss across all settled picks."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from betting.interfaces.ledger_repository import ILedgerRepository
 
 logger = logging.getLogger(__name__)
+
+CALIBRATION_BUCKETS = [
+    (0.60, 0.65),
+    (0.65, 0.70),
+    (0.70, 0.75),
+    (0.75, 1.01),
+]
 
 
 @dataclass
@@ -21,6 +28,10 @@ class PnlSummary:
     gross_return: float     # sum of (odds * stake) for won bets
     net_pnl: float          # gross_return - total_staked
     roi: float              # net_pnl / total_staked, 0.0 if no staked bets
+    total_skips: int = 0
+    skip_reasons: dict[str, int] = field(default_factory=dict)
+    clv_average: float | None = None
+    calibration_buckets: list[dict] = field(default_factory=list)
 
 
 class PnlService:
@@ -30,6 +41,7 @@ class PnlService:
     def compute(self) -> PnlSummary:
         """Computes P&L across all settled picks."""
         picks = self._ledger.get_all_picks()
+        skips = self._ledger.get_all_skips()
 
         total_picks = len(picks)
         settled = 0
@@ -62,6 +74,58 @@ class PnlService:
         win_rate = won / win_denominator if win_denominator > 0 else 0.0
         roi = net_pnl / total_staked if total_staked > 0 else 0.0
 
+        # Skip reason aggregation
+        skip_reasons: dict[str, int] = {}
+        for skip in skips:
+            reason = skip.get("skip_reason") or "unknown"
+            # Normalise verbose reasons to categories
+            if "confidence below threshold" in reason:
+                key = "confidence_below_threshold"
+            elif "no edge" in reason:
+                key = "no_edge"
+            elif "no signals" in reason:
+                key = "no_signals_available"
+            elif "veto" in reason:
+                key = "veto"
+            elif "ineligible" in reason:
+                key = "ineligible_fixture"
+            else:
+                key = reason
+            skip_reasons[key] = skip_reasons.get(key, 0) + 1
+
+        # CLV calculation
+        clv_values = []
+        for pick in picks:
+            selection_odds = pick.get("selection_odds") or pick.get("odds", 0)
+            opening_odds = pick.get("opening_odds")
+            if opening_odds and opening_odds > 0 and selection_odds > 0:
+                # CLV = implied prob at opening - implied prob at analysis
+                # Positive = opening implied prob higher (opening odds shorter)
+                # Negative = opening implied prob lower (you got shorter odds than opening)
+                clv = (1.0 / opening_odds) - (1.0 / selection_odds)
+                clv_values.append(clv)
+
+        clv_average = sum(clv_values) / len(clv_values) if clv_values else None
+
+        # Confidence calibration buckets
+        buckets = []
+        settled_picks = [p for p in picks if p.get("outcome") in ("won", "lost")]
+
+        for low, high in CALIBRATION_BUCKETS:
+            bucket_picks = [
+                p for p in settled_picks
+                if low <= (p.get("confidence") or 0.0) < high
+            ]
+            won_count = sum(1 for p in bucket_picks if p.get("outcome") == "won")
+            buckets.append({
+                "range": f"{low:.2f}-{high:.2f}".replace("-1.01", "+"),
+                "picks": len(bucket_picks),
+                "won": won_count,
+                "win_rate": won_count / len(bucket_picks) if bucket_picks else None,
+            })
+
+        calibration_buckets = [b for b in buckets if b["picks"] > 0]
+
         return PnlSummary(
             total_picks=total_picks,
             settled=settled,
@@ -74,4 +138,8 @@ class PnlService:
             gross_return=gross_return,
             net_pnl=net_pnl,
             roi=roi,
+            total_skips=len(skips),
+            skip_reasons=skip_reasons,
+            clv_average=clv_average,
+            calibration_buckets=calibration_buckets,
         )

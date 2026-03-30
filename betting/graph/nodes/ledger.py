@@ -8,6 +8,8 @@ from betting.services.ledger_service import LedgerService
 
 logger = logging.getLogger(__name__)
 
+STALE_SIGNAL_HOURS = 6
+
 
 class LedgerNode:
     def __init__(
@@ -53,6 +55,31 @@ class LedgerNode:
                         verdict.get("consensus_confidence", 0),
                         verdict.get("expected_value", 0),
                     )
+
+            # Check for stale signals
+            signals_to_check = [
+                ("statistical_signal", state.get("statistical_signal")),
+                ("market_signal", state.get("market_signal")),
+            ]
+
+            for name, signal in signals_to_check:
+                if not signal:
+                    continue
+                ts_raw = signal.get("data_timestamp")
+                if not ts_raw:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(ts_raw)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    age_hours = (datetime.now(tz=timezone.utc) - ts).total_seconds() / 3600
+                    if age_hours > STALE_SIGNAL_HOURS:
+                        logger.warning(
+                            "Stale signal from %s for fixture %s — %.1f hours old",
+                            name, state["fixture"].get("id"), age_hours,
+                        )
+                except (ValueError, TypeError):
+                    pass
 
             return result
         except Exception as exc:
