@@ -4,6 +4,7 @@ from scipy.stats import poisson  # type: ignore[import-untyped]
 
 from betting.config.market_config import MarketConfigLoader
 from betting.interfaces.stats_provider import IStatsProvider
+from betting.markets.probability import get_calculator
 from betting.models.fixture import Fixture
 from betting.models.odds import OddsSnapshot
 from betting.models.signal import Signal
@@ -25,10 +26,9 @@ class StatisticalService:
         1. Fetch attack/defence ratings for both teams from stats_provider.
         2. Compute expected goals (home_xg, away_xg) via Poisson model.
         3. Build score matrix (0..7 x 0..7).
-        4. Derive P(home win), P(draw), P(away win).
-        5. Derive selection probabilities from market registry.
-        6. Compare model probability to implied probability from odds.
-        7. Return Signal with best selection, confidence and edge.
+        4. Dispatch to ProbabilityCalculator for the market's evaluation_strategy.
+        5. Compare model probability to implied probability from odds.
+        6. Return Signal with best selection, confidence and edge.
         """
         market = self._market_loader.get(odds.market)
         if not market:
@@ -48,23 +48,23 @@ class StatisticalService:
 
         matrix = self._score_matrix(home_xg, away_xg)
 
-        p_home = sum(prob for (h, a), prob in matrix.items() if h > a)
-        p_draw = sum(prob for (h, a), prob in matrix.items() if h == a)
-        p_away = sum(prob for (h, a), prob in matrix.items() if h < a)
-
-        # FTR code -> model probability mapping
-        ftr_probs = {"H": p_home, "D": p_draw, "A": p_away}
+        # Dispatch to the appropriate probability calculator for this market
+        calculator = get_calculator(market.evaluation_strategy)
+        if not calculator:
+            raise ValueError(
+                f"No probability calculator for strategy {market.evaluation_strategy!r}"
+            )
 
         edges: dict[str, float] = {}
         model_probs: dict[str, float] = {}
 
-        # Currently only works for markets with FTR-based winning conditions
-        # (string wins_if like "H | D"). BTTS/total markets will need their
-        # own probability calculators — a known extension point.
         for sel in market.selections:
-            codes = [c.strip() for c in sel.wins_if.split("|")] if isinstance(sel.wins_if, str) else []
-            model_prob = sum(ftr_probs.get(code, 0.0) for code in codes)
-            implied_prob = 1.0 / odds.selections[sel.id] if odds.selections.get(sel.id, 0) > 0 else 0.0
+            model_prob = calculator.calculate(sel, matrix, home_xg, away_xg)
+            implied_prob = (
+                1.0 / odds.selections[sel.id]
+                if odds.selections.get(sel.id, 0) > 0
+                else 0.0
+            )
             edges[sel.id] = model_prob - implied_prob
             model_probs[sel.id] = model_prob
 

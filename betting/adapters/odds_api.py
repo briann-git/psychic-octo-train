@@ -129,12 +129,12 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             logger.warning("Market %r not in registry", market_id)
             return None
 
-        if market.derived:
-            return self._build_derived_snapshot(event, fixture_id, market)
+        if market.odds_derivation == "implied_sum":
+            return self._build_implied_sum_snapshot(event, fixture_id, market)
         else:
             return self._build_direct_snapshot(event, fixture_id, market)
 
-    def _build_derived_snapshot(
+    def _build_implied_sum_snapshot(
         self, event: dict, fixture_id: str, market: MarketDefinition
     ) -> OddsSnapshot | None:
         source_prices = self._extract_source_prices(event, market.odds_api_market_key)

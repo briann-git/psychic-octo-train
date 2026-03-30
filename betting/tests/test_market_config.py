@@ -17,7 +17,7 @@ _SAMPLE_YAML = {
     "double_chance": {
         "active": True,
         "odds_api_market_key": "h2h",
-        "derived": True,
+        "odds_derivation": "implied_sum",
         "evaluation_strategy": "ftr",
         "settlement_source": "api",
         "selections": [
@@ -29,7 +29,7 @@ _SAMPLE_YAML = {
     "btts": {
         "active": False,
         "odds_api_market_key": "btts",
-        "derived": False,
+        "odds_derivation": "direct",
         "evaluation_strategy": "btts",
         "settlement_source": "api",
         "selections": [
@@ -40,7 +40,7 @@ _SAMPLE_YAML = {
     "over_under_25": {
         "active": False,
         "odds_api_market_key": "totals",
-        "derived": False,
+        "odds_derivation": "direct",
         "evaluation_strategy": "total",
         "settlement_source": "api",
         "selections": [
@@ -90,7 +90,7 @@ class TestGet:
         assert market is not None
         assert market.id == "double_chance"
         assert market.odds_api_market_key == "h2h"
-        assert market.derived is True
+        assert market.odds_derivation == "implied_sum"
         assert market.active is True
         assert market.evaluation_strategy == "ftr"
         assert market.settlement_source == "api"
@@ -146,15 +146,15 @@ class TestOddsApiMarketKey:
         assert loader.odds_api_market_key("nonexistent") is None
 
 
-class TestIsDerived:
-    def test_derived_true(self, loader):
-        assert loader.is_derived("double_chance") is True
+class TestOddsDerivedMethod:
+    def test_implied_sum_for_double_chance(self, loader):
+        assert loader.odds_derivation("double_chance") == "implied_sum"
 
-    def test_derived_false(self, loader):
-        assert loader.is_derived("btts") is False
+    def test_direct_for_btts(self, loader):
+        assert loader.odds_derivation("btts") == "direct"
 
-    def test_derived_false_for_unknown(self, loader):
-        assert loader.is_derived("nonexistent") is False
+    def test_direct_for_unknown(self, loader):
+        assert loader.odds_derivation("nonexistent") == "direct"
 
 
 class TestSettlementSource:

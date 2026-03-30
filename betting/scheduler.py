@@ -174,7 +174,10 @@ def run_morning_job() -> None:
         market_loader=c.market_loader,
         csv_service=c.csv_service,
     )
-    settlement = result_service.settle_pending_picks(c.active_leagues)
+    settlement = result_service.settle_pending_picks(
+        c.active_leagues,
+        season=c.season,
+    )
     logger.info(
         "Settlement complete — settled: %d, won: %d, lost: %d, void: %d, still_pending: %d",
         settlement.settled, settlement.won, settlement.lost,

@@ -40,20 +40,25 @@ class ResultIngestionService:
         self._evaluator = OutcomeEvaluator()
 
     def settle_pending_picks(
-        self, leagues: list[str]
+        self,
+        leagues: list[str],
+        season: str | None = None,
     ) -> SettlementSummary:
         """
         Fetches recent results from the Odds API, matches against pending picks,
         and marks each as won/lost/void.
         Returns a summary of what was settled.
         """
+        if season is None:
+            from betting.utils import current_season
+            season = current_season()
         pending = self._ledger.get_pending_picks()
         if not pending:
             logger.info("No pending picks to settle")
             return SettlementSummary()
 
         # Fetch results for all active leagues
-        results = self._load_results(leagues)
+        results = self._load_results(leagues, season)
 
         now = datetime.now(tz=timezone.utc)
         summary = SettlementSummary()
@@ -93,7 +98,7 @@ class ResultIngestionService:
 
         return summary
 
-    def _load_results(self, leagues: list[str]) -> dict[tuple[str, str], dict]:
+    def _load_results(self, leagues: list[str], season: str) -> dict[tuple[str, str], dict]:
         """
         Routes settlement data fetching by market settlement_source.
         Merges API and CSV results into a single dict keyed by (home_team, away_team).
@@ -111,7 +116,7 @@ class ResultIngestionService:
                 results.setdefault(key, {}).update(val)
 
         if needs_csv and self._csv_service:
-            csv_results = self._load_from_csv(leagues)
+            csv_results = self._load_from_csv(leagues, season)
             for key, val in csv_results.items():
                 results.setdefault(key, {}).update(val)
         elif needs_csv and not self._csv_service:
@@ -135,11 +140,11 @@ class ResultIngestionService:
                 logger.error("Failed to fetch results for %s: %s", league, exc)
         return results
 
-    def _load_from_csv(self, leagues: list[str]) -> dict[tuple[str, str], dict]:
+    def _load_from_csv(self, leagues: list[str], season: str) -> dict[tuple[str, str], dict]:
         results: dict[tuple[str, str], dict] = {}
         for league in leagues:
             try:
-                csv_path = self._csv_service.get(league, "")
+                csv_path = self._csv_service.get(league, season)
                 with open(csv_path, encoding="utf-8-sig", newline="") as f:
                     reader = csv.DictReader(f)
                     for row in reader:
