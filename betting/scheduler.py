@@ -198,7 +198,7 @@ def run_analysis() -> None:
             weights=settings.agent_weights,
             confidence_threshold=settings.confidence_threshold,
         ),
-        ledger_node=LedgerNode(ledger_service),
+        ledger_node=LedgerNode(ledger_service, paper_trading=settings.paper_trading),
     )
 
     # Run
