@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS picks (
     expected_value  REAL NOT NULL,
     recorded_at     TEXT NOT NULL,
     outcome         TEXT,
-    settled_at      TEXT
+    settled_at      TEXT,
+    selection_odds  REAL,
+    season          TEXT
 );
 
 CREATE TABLE IF NOT EXISTS skips (
@@ -39,7 +41,8 @@ CREATE TABLE IF NOT EXISTS skips (
     skip_reason     TEXT NOT NULL,
     confidence      REAL,
     errors          TEXT,
-    recorded_at     TEXT NOT NULL
+    recorded_at     TEXT NOT NULL,
+    season          TEXT
 );
 
 DROP TABLE IF EXISTS odds_history;
@@ -80,14 +83,19 @@ class SqliteLedgerRepository(ILedgerRepository):
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         """Applies schema migrations guarded by column existence checks."""
-        cursor = conn.execute("PRAGMA table_info(picks)")
-        columns = {row[1] for row in cursor.fetchall()}
-        if "outcome" not in columns:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(picks)")}
+        if "outcome" not in cols:
             conn.execute("ALTER TABLE picks ADD COLUMN outcome TEXT")
-        if "settled_at" not in columns:
+        if "settled_at" not in cols:
             conn.execute("ALTER TABLE picks ADD COLUMN settled_at TEXT")
-        if "selection_odds" not in columns:
+        if "selection_odds" not in cols:
             conn.execute("ALTER TABLE picks ADD COLUMN selection_odds REAL")
+        if "season" not in cols:
+            conn.execute("ALTER TABLE picks ADD COLUMN season TEXT")
+
+        skip_cols = {row[1] for row in conn.execute("PRAGMA table_info(skips)")}
+        if "season" not in skip_cols:
+            conn.execute("ALTER TABLE skips ADD COLUMN season TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
@@ -137,8 +145,8 @@ class SqliteLedgerRepository(ILedgerRepository):
                 INSERT OR REPLACE INTO picks
                 (id, fixture_id, home_team, away_team, league, kickoff,
                  market, selection, odds, stake, confidence, expected_value,
-                 recorded_at, selection_odds)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 recorded_at, selection_odds, season)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -155,6 +163,7 @@ class SqliteLedgerRepository(ILedgerRepository):
                     verdict.expected_value,
                     datetime.now(tz=timezone.utc).isoformat(),
                     selection_odds,
+                    fixture.season,
                 ),
             )
 
@@ -173,8 +182,8 @@ class SqliteLedgerRepository(ILedgerRepository):
                 """
                 INSERT OR REPLACE INTO skips
                 (id, fixture_id, home_team, away_team, league, kickoff,
-                 market, skip_reason, confidence, errors, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 market, skip_reason, confidence, errors, recorded_at, season)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -188,6 +197,7 @@ class SqliteLedgerRepository(ILedgerRepository):
                     verdict.consensus_confidence,
                     errors_json,
                     datetime.now(tz=timezone.utc).isoformat(),
+                    fixture.season,
                 ),
             )
 

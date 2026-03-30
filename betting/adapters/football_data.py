@@ -189,8 +189,8 @@ class FootballDataProvider(IStatsProvider):
                 home_defence = (sum(h_conceded) / home_games) / league_avg_away
             else:
                 logger.debug(
-                    "Team %r has %d home games (< %d), falling back to 1.0 for home ratings",
-                    team, home_games, MIN_GAMES_THRESHOLD,
+                    "Team %r has %d home games (< %d) in %s %s — falling back to 1.0 for home ratings",
+                    team, home_games, MIN_GAMES_THRESHOLD, league, season,
                 )
                 home_attack = 1.0
                 home_defence = 1.0
@@ -200,8 +200,8 @@ class FootballDataProvider(IStatsProvider):
                 away_defence = (sum(a_conceded) / away_games) / league_avg_home
             else:
                 logger.debug(
-                    "Team %r has %d away games (< %d), falling back to 1.0 for away ratings",
-                    team, away_games, MIN_GAMES_THRESHOLD,
+                    "Team %r has %d away games (< %d) in %s %s — falling back to 1.0 for away ratings",
+                    team, away_games, MIN_GAMES_THRESHOLD, league, season,
                 )
                 away_attack = 1.0
                 away_defence = 1.0
