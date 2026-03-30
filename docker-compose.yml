@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  scheduler:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data/db:/data/db
+      - ./data/csv_cache:/data/csv_cache
+    environment:
+      DB_PATH: /data/db/ledger.db
+      CSV_CACHE_DIR: /data/csv_cache
