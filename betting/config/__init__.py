@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     oci_bucket: str = "betting-backups"
     backup_local_retention_days: int = 7
     backup_remote_retention_days: int = 30
+    calendar_lookahead_days: int = 7
+    calendar_refresh_hour: int = 20    # Sunday 20:00 UTC
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
