@@ -1,7 +1,7 @@
-"""Tests for FixtureCalendarService."""
+"""Tests for FixtureCalendarService and _get_active_leagues_today."""
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -188,3 +188,97 @@ class TestUpcomingFixtureDates:
         dates = service.upcoming_fixture_dates(leagues=["PL"])
 
         assert dates == []
+
+
+class TestGetActiveLeaguesToday:
+    """Tests for scheduler._get_active_leagues_today."""
+
+    def _make_components(self, active_leagues: list[str], calendar_fixtures: list[dict]):
+        """Build a minimal _Components-like object with mocked ledger_repo and odds_api."""
+        from betting.scheduler import _Components
+
+        ledger_repo = MagicMock()
+        ledger_repo.get_calendar_fixtures.return_value = calendar_fixtures
+
+        odds_api = MagicMock()
+        csv_service = MagicMock()
+        fixture_service = MagicMock()
+        stats_provider = MagicMock()
+        league_loader = MagicMock()
+        market_loader = MagicMock()
+
+        return _Components(
+            odds_api=odds_api,
+            csv_service=csv_service,
+            ledger_repo=ledger_repo,
+            fixture_service=fixture_service,
+            stats_provider=stats_provider,
+            league_loader=league_loader,
+            market_loader=market_loader,
+            active_leagues=active_leagues,
+            season="2024/25",
+        )
+
+    @patch("betting.scheduler.settings")
+    def test_returns_only_leagues_with_fixtures(self, mock_settings):
+        mock_settings.min_lead_hours = 2
+        mock_settings.max_lead_hours = 48
+        mock_settings.calendar_lookahead_days = 7
+
+        from betting.scheduler import _get_active_leagues_today
+
+        # Only PL and LaLiga have fixtures — BL1 does not
+        calendar_fixtures = [
+            {"league": "PL", "kickoff": "2025-04-01T15:00:00+00:00"},
+            {"league": "PL", "kickoff": "2025-04-01T17:30:00+00:00"},
+            {"league": "LaLiga", "kickoff": "2025-04-01T20:00:00+00:00"},
+        ]
+        c = self._make_components(
+            active_leagues=["PL", "LaLiga", "BL1"],
+            calendar_fixtures=calendar_fixtures,
+        )
+
+        result = _get_active_leagues_today(c)
+
+        assert sorted(result) == ["LaLiga", "PL"]
+        # BL1 should NOT be in the result
+        assert "BL1" not in result
+
+    @patch("betting.scheduler.settings")
+    def test_returns_empty_when_no_fixtures_in_window(self, mock_settings):
+        mock_settings.min_lead_hours = 2
+        mock_settings.max_lead_hours = 48
+        mock_settings.calendar_lookahead_days = 7
+
+        from betting.scheduler import _get_active_leagues_today
+
+        c = self._make_components(
+            active_leagues=["PL", "LaLiga"],
+            calendar_fixtures=[],
+        )
+        # Mock upstream_fixture_dates to avoid real calls
+        with patch("betting.scheduler.FixtureCalendarService") as mock_cal_cls:
+            mock_cal_cls.return_value.upcoming_fixture_dates.return_value = []
+            result = _get_active_leagues_today(c)
+
+        assert result == []
+
+    @patch("betting.scheduler.settings")
+    def test_single_league_returned_when_only_one_has_fixtures(self, mock_settings):
+        mock_settings.min_lead_hours = 2
+        mock_settings.max_lead_hours = 48
+        mock_settings.calendar_lookahead_days = 7
+
+        from betting.scheduler import _get_active_leagues_today
+
+        calendar_fixtures = [
+            {"league": "BL1", "kickoff": "2025-04-01T18:30:00+00:00"},
+        ]
+        c = self._make_components(
+            active_leagues=["PL", "LaLiga", "BL1", "SA", "L1", "FL1"],
+            calendar_fixtures=calendar_fixtures,
+        )
+
+        result = _get_active_leagues_today(c)
+
+        assert result == ["BL1"]

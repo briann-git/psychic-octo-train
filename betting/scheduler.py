@@ -5,6 +5,7 @@ Runs via APScheduler on a daily cron schedule.
 
 import logging
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -123,6 +124,7 @@ def run_snapshot_job(
     ledger_repo: SqliteLedgerRepository,
     snapshot_type: str,
     market_loader: MarketConfigLoader | None = None,
+    leagues: list[str] | None = None,
 ) -> None:
     """
     Fetches current odds for all eligible fixtures and persists to odds_history.
@@ -130,7 +132,10 @@ def run_snapshot_job(
     """
     loader = market_loader or MarketConfigLoader()
     active_market_ids = [m.id for m in loader.active_markets()]
-    eligible = fixture_service.get_eligible_fixtures(markets=active_market_ids)
+    eligible = fixture_service.get_eligible_fixtures(
+        markets=active_market_ids,
+        leagues=leagues,
+    )
     logger.info("Snapshot job (%s): %d fixture(s)", snapshot_type, len(eligible))
 
     for fixture, odds in eligible:
@@ -195,15 +200,16 @@ def run_analysis() -> None:
 
     c = _build_components()
 
-    if not _has_fixtures_today(c):
+    leagues_today = _get_active_leagues_today(c)
+    if not leagues_today:
         logger.info("Analysis run skipped — no fixtures today")
         return
 
     # Pre-download CSVs
-    download_season_data(c.csv_service, c.active_leagues, c.season)
+    download_season_data(c.csv_service, leagues_today, c.season)
 
     # Pre-analysis snapshot
-    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "pre_analysis", c.market_loader)
+    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "pre_analysis", c.market_loader, leagues=leagues_today)
 
     # Services
     statistical_service = StatisticalService(
@@ -230,7 +236,10 @@ def run_analysis() -> None:
 
     # Run
     active_market_ids = [m.id for m in c.market_loader.active_markets()]
-    eligible = c.fixture_service.get_eligible_fixtures(markets=active_market_ids)
+    eligible = c.fixture_service.get_eligible_fixtures(
+        markets=active_market_ids,
+        leagues=leagues_today,
+    )
     logger.info("Found %d eligible fixture(s)", len(eligible))
 
     for fixture, odds in eligible:
@@ -293,23 +302,29 @@ def run_calendar_refresh() -> None:
     logger.info("Calendar refresh completed — %d fixture(s)", count)
 
 
-def _has_fixtures_today(c: _Components) -> bool:
+def _get_active_leagues_today(c: _Components) -> list[str]:
     """
-    Queries the local fixture calendar to check if there are eligible
-    fixtures in today's analysis window. No API calls.
-    Returns False and logs if the calendar appears empty or stale.
+    Returns the subset of active leagues that have fixtures in today's
+    analysis window. No API calls — reads from SQLite only.
     """
-    calendar_service = FixtureCalendarService(
-        fixture_provider=c.odds_api,
-        ledger_repo=c.ledger_repo,
-        lookahead_days=settings.calendar_lookahead_days,
+    now = datetime.now(tz=timezone.utc)
+    from_dt = now + timedelta(hours=settings.min_lead_hours)
+    to_dt = now + timedelta(hours=settings.max_lead_hours)
+
+    fixtures = c.ledger_repo.get_calendar_fixtures(
+        from_dt=from_dt,
+        to_dt=to_dt,
+        leagues=c.active_leagues,
     )
 
-    if not calendar_service.has_fixtures_today(
-        leagues=c.active_leagues,
-        min_lead_hours=settings.min_lead_hours,
-        max_lead_hours=settings.max_lead_hours,
-    ):
+    active_today = list({f["league"] for f in fixtures})
+
+    if not active_today:
+        calendar_service = FixtureCalendarService(
+            fixture_provider=c.odds_api,
+            ledger_repo=c.ledger_repo,
+            lookahead_days=settings.calendar_lookahead_days,
+        )
         upcoming = calendar_service.upcoming_fixture_dates(c.active_leagues)
         if upcoming:
             logger.info(
@@ -321,18 +336,22 @@ def _has_fixtures_today(c: _Components) -> bool:
                 "No fixtures in today's window and calendar appears empty. "
                 "Consider running the calendar refresh job manually."
             )
-        return False
 
-    return True
+    return active_today
 
 
 def _run_snapshot_from_fresh(snapshot_type: str) -> None:
     """Builds fresh components and runs a snapshot job. Used by cron lambdas."""
     c = _build_components()
-    if not _has_fixtures_today(c):
+    leagues_today = _get_active_leagues_today(c)
+    if not leagues_today:
         logger.info("Snapshot job (%s) skipped — no fixtures today", snapshot_type)
         return
-    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, snapshot_type, c.market_loader)
+    run_snapshot_job(
+        c.odds_api, c.fixture_service, c.ledger_repo,
+        snapshot_type, c.market_loader,
+        leagues=leagues_today,
+    )
 
 
 def main() -> None:

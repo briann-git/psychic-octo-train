@@ -36,28 +36,31 @@ class FixtureService:
     def get_eligible_fixtures(
         self,
         markets: list[str],
+        leagues: list[str] | None = None,
     ) -> list[tuple[Fixture, OddsSnapshot]]:
         """
         Returns (fixture, odds) pairs that pass all eligibility checks.
         Filters applied in order:
-          1. League in supported_leagues
+          1. League in effective leagues (passed-in subset or all supported)
           2. Kickoff within [min_lead_hours, max_lead_hours] window
           3. Not during an international break
           4. Odds snapshot available for requested markets
         """
+        effective_leagues = leagues if leagues is not None else self._supported_leagues
+
         now = datetime.now(tz=timezone.utc)
         earliest = now + timedelta(hours=self._min_lead_hours)
         latest = now + timedelta(hours=self._max_lead_hours)
 
         raw: list[Fixture] = self._fixture_provider.fetch_upcoming(
-            leagues=self._supported_leagues,
+            leagues=effective_leagues,
             days_ahead=self._max_lead_hours // 24 + 1,
         )
 
         results: list[tuple[Fixture, OddsSnapshot]] = []
         for fixture in raw:
             # 1. League filter
-            if fixture.league not in self._supported_leagues:
+            if fixture.league not in effective_leagues:
                 logger.debug("Fixture %s filtered: league %r not supported", fixture.id, fixture.league)
                 continue
 
