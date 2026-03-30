@@ -21,6 +21,7 @@ from betting.graph.nodes.statistical import StatisticalNode
 from betting.graph.nodes.synthesiser import SynthesiserNode
 from betting.graph.pipeline import build_pipeline
 from betting.graph.state import BettingState
+from betting.services.backup_service import BackupService
 from betting.services.csv_download_service import CsvDownloadService
 from betting.services.fixture_service import FixtureService
 from betting.services.ledger_service import LedgerService
@@ -132,6 +133,24 @@ def run_snapshot_job(
             logger.error("Snapshot write failed for %s: %s", fixture.id, exc)
 
 
+def run_backup_job() -> None:
+    logger.info("Backup job started")
+    backup_service = BackupService(
+        db_path=settings.db_path,
+        backup_dir=settings.backup_dir,
+        oci_namespace=settings.oci_namespace,
+        oci_bucket=settings.oci_bucket,
+        local_retention_days=settings.backup_local_retention_days,
+        remote_retention_days=settings.backup_remote_retention_days,
+    )
+    try:
+        backup_service.run()
+        logger.info("Backup job completed")
+    except Exception as exc:
+        logger.error("Backup job failed: %s", exc)
+        # Non-fatal — do not raise, morning job must still run
+
+
 def run_morning_job() -> None:
     """08:00 — settle yesterday's results, then take opening snapshot."""
     logger.info("Morning job started")
@@ -238,6 +257,7 @@ def _run_snapshot_from_fresh(snapshot_type: str) -> None:
 
 def main() -> None:
     scheduler = BlockingScheduler()
+    scheduler.add_job(run_backup_job, "cron", hour=4, minute=0)
     scheduler.add_job(run_morning_job, "cron", hour=8, minute=0)
     scheduler.add_job(
         lambda: _run_snapshot_from_fresh("intermediate"),

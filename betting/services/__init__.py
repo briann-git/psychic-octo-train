@@ -4,6 +4,7 @@ from betting.services.statistical_service import StatisticalService
 from betting.services.ledger_service import LedgerService
 from betting.services.pnl_service import PnlService
 from betting.services.result_ingestion_service import ResultIngestionService
+from betting.services.backup_service import BackupService
 
 __all__ = [
     "FixtureService",
@@ -12,4 +13,5 @@ __all__ = [
     "LedgerService",
     "PnlService",
     "ResultIngestionService",
+    "BackupService",
 ]

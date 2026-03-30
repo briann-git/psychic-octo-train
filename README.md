@@ -27,8 +27,8 @@ sudo usermod -aG docker ubuntu
 git clone <your-repo>
 cd psychic-octo-train
 cp .env.example .env
-# Edit .env — add ODDS_API_KEY, set PAPER_TRADING=true
-mkdir -p data/db data/csv_cache
+# Edit .env — add ODDS_API_KEY, set PAPER_TRADING=true, set OCI_NAMESPACE
+mkdir -p data/db data/csv_cache data/backups
 docker compose up -d
 ```
 
@@ -50,6 +50,46 @@ docker compose up -d --build
 SQLite database and CSV cache are mounted from `./data/` on the host VM. They survive
 container restarts and redeployments. Back up `./data/db/ledger.db` periodically — this
 is your entire history.
+
+### Object Storage setup
+
+Automated daily backups run at 04:00 UTC and upload to Oracle Object Storage.
+Free tier includes 20GB — more than sufficient for daily SQLite backups.
+
+```bash
+# Get your namespace
+oci os ns get
+
+# Create backup bucket
+oci os bucket create \
+  --compartment-id <compartment-id> \
+  --name betting-backups
+
+# Create dynamic group for the VM instance
+# In Oracle Cloud Console:
+# Identity > Dynamic Groups > Create
+# Rule: ANY {instance.id = '<your-instance-ocid>'}
+
+# Create IAM policy
+# Identity > Policies > Create
+# Statement:
+# Allow dynamic-group <group-name> to manage objects
+#   in compartment <compartment> where target.bucket.name = 'betting-backups'
+```
+
+Set `OCI_NAMESPACE` in `.env` (find it with `oci os ns get`). On the Oracle Cloud VM the
+scheduler authenticates automatically via instance principal — no API keys needed in the
+container.
+
+### Verify backups
+
+```bash
+# List backups in Object Storage
+oci os object list --namespace <namespace> --bucket-name betting-backups
+
+# Check local backups inside container
+docker compose exec scheduler ls /data/backups/
+```
 
 ## Known Constraints
 

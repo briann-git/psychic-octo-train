@@ -9,6 +9,7 @@ services:
     volumes:
       - ./data/db:/data/db
       - ./data/csv_cache:/data/csv_cache
+      - ./data/backups:/data/backups
     environment:
       DB_PATH: /data/db/ledger.db
       CSV_CACHE_DIR: /data/csv_cache

@@ -16,6 +16,11 @@ class Settings(BaseSettings):
         default={"statistical": 0.60, "market": 0.40}
     )
     paper_trading: bool = True    # default safe — flip to false when ready to place real bets
+    backup_dir: str = "/data/backups"
+    oci_namespace: str = ""
+    oci_bucket: str = "betting-backups"
+    backup_local_retention_days: int = 7
+    backup_remote_retention_days: int = 30
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
