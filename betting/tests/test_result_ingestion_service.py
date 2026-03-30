@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from betting.adapters.odds_api import OddsApiProvider
+from betting.config.market_config import MarketConfigLoader
 from betting.interfaces.ledger_repository import ILedgerRepository
 from betting.services.result_ingestion_service import ResultIngestionService, SettlementSummary
 
@@ -26,9 +27,11 @@ def _make_service(
     if fetch_results_side_effect is not None:
         odds_api.fetch_results.side_effect = fetch_results_side_effect
 
+    market_loader = MarketConfigLoader()
     service = ResultIngestionService(
         odds_api=odds_api,
         ledger_repo=ledger,
+        market_loader=market_loader,
         settlement_lag_hours=settlement_lag_hours,
     )
     return service, odds_api, ledger
@@ -48,12 +51,14 @@ def _make_pick(
     away_team: str = "Chelsea",
     selection: str = "1X",
     kickoff: str | None = None,
+    market: str = "double_chance",
 ) -> dict:
     return {
         "id": pick_id,
         "home_team": home_team,
         "away_team": away_team,
         "selection": selection,
+        "market": market,
         "kickoff": kickoff or _past_kickoff(24),
         "outcome": None,
     }
@@ -68,51 +73,51 @@ class TestDetermineOutcome:
 
     def test_1x_wins_on_home(self):
         s = self._service()
-        assert s._determine_outcome("1X", {"ftr": "H"}) == "won"
+        assert s._determine_outcome("1X", "double_chance", {"ftr": "H"}) == "won"
 
     def test_1x_wins_on_draw(self):
         s = self._service()
-        assert s._determine_outcome("1X", {"ftr": "D"}) == "won"
+        assert s._determine_outcome("1X", "double_chance", {"ftr": "D"}) == "won"
 
     def test_1x_loses_on_away(self):
         s = self._service()
-        assert s._determine_outcome("1X", {"ftr": "A"}) == "lost"
+        assert s._determine_outcome("1X", "double_chance", {"ftr": "A"}) == "lost"
 
     def test_12_wins_on_home(self):
         s = self._service()
-        assert s._determine_outcome("12", {"ftr": "H"}) == "won"
+        assert s._determine_outcome("12", "double_chance", {"ftr": "H"}) == "won"
 
     def test_12_wins_on_away(self):
         s = self._service()
-        assert s._determine_outcome("12", {"ftr": "A"}) == "won"
+        assert s._determine_outcome("12", "double_chance", {"ftr": "A"}) == "won"
 
     def test_12_loses_on_draw(self):
         s = self._service()
-        assert s._determine_outcome("12", {"ftr": "D"}) == "lost"
+        assert s._determine_outcome("12", "double_chance", {"ftr": "D"}) == "lost"
 
     def test_x2_wins_on_draw(self):
         s = self._service()
-        assert s._determine_outcome("X2", {"ftr": "D"}) == "won"
+        assert s._determine_outcome("X2", "double_chance", {"ftr": "D"}) == "won"
 
     def test_x2_wins_on_away(self):
         s = self._service()
-        assert s._determine_outcome("X2", {"ftr": "A"}) == "won"
+        assert s._determine_outcome("X2", "double_chance", {"ftr": "A"}) == "won"
 
     def test_x2_loses_on_home(self):
         s = self._service()
-        assert s._determine_outcome("X2", {"ftr": "H"}) == "lost"
+        assert s._determine_outcome("X2", "double_chance", {"ftr": "H"}) == "lost"
 
     def test_unknown_selection_returns_void(self):
         s = self._service()
-        assert s._determine_outcome("UNKNOWN", {"ftr": "H"}) == "void"
+        assert s._determine_outcome("UNKNOWN", "double_chance", {"ftr": "H"}) == "void"
 
     def test_empty_ftr_returns_void(self):
         s = self._service()
-        assert s._determine_outcome("1X", {"ftr": ""}) == "void"
+        assert s._determine_outcome("1X", "double_chance", {"ftr": ""}) == "void"
 
     def test_missing_ftr_returns_void(self):
         s = self._service()
-        assert s._determine_outcome("1X", {}) == "void"
+        assert s._determine_outcome("1X", "double_chance", {}) == "void"
 
 
 # --- _ftr_from_scores tests ---

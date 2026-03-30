@@ -28,9 +28,7 @@ def _odds_dict() -> dict:
         "fixture_id": "fix-001",
         "market": "double_chance",
         "bookmaker": "stub",
-        "home_draw": 1.40,
-        "home_away": 1.25,
-        "draw_away": 2.10,
+        "selections": {"1X": 1.40, "12": 1.25, "X2": 2.10},
         "fetched_at": datetime.now(tz=timezone.utc),
     }
 

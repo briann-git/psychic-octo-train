@@ -1,0 +1,70 @@
+double_chance:
+  active: true
+  odds_api_market_key: "h2h"
+  derived: true
+  evaluation_strategy: "ftr"
+  settlement_source: "api"
+  selections:
+    - id: "1X"
+      label: "Home or Draw"
+      wins_if: "H | D"
+    - id: "12"
+      label: "Home or Away"
+      wins_if: "H | A"
+    - id: "X2"
+      label: "Draw or Away"
+      wins_if: "D | A"
+
+btts:
+  active: false
+  odds_api_market_key: "btts"
+  derived: false
+  evaluation_strategy: "btts"
+  settlement_source: "api"
+  selections:
+    - id: "yes"
+      label: "Both Teams to Score"
+      wins_if: "btts_yes"
+    - id: "no"
+      label: "Neither Team to Score"
+      wins_if: "btts_no"
+
+over_under_25:
+  active: false
+  odds_api_market_key: "totals"
+  derived: false
+  evaluation_strategy: "total"
+  settlement_source: "api"
+  selections:
+    - id: "over_25"
+      label: "Over 2.5 Goals"
+      wins_if:
+        columns: ["fthg", "ftag"]
+        operator: ">"
+        threshold: 2.5
+    - id: "under_25"
+      label: "Under 2.5 Goals"
+      wins_if:
+        columns: ["fthg", "ftag"]
+        operator: "<="
+        threshold: 2.5
+
+cards_over_under_35:
+  active: false
+  odds_api_market_key: "player_cards"
+  derived: false
+  evaluation_strategy: "total"
+  settlement_source: "csv"
+  selections:
+    - id: "over_35"
+      label: "Over 3.5 Cards"
+      wins_if:
+        columns: ["hy", "ay", "hr", "ar"]
+        operator: ">"
+        threshold: 3.5
+    - id: "under_35"
+      label: "Under 3.5 Cards"
+      wins_if:
+        columns: ["hy", "ay", "hr", "ar"]
+        operator: "<="
+        threshold: 3.5
