@@ -100,7 +100,8 @@ class PnlService:
             opening_odds = pick.get("opening_odds")
             if opening_odds and opening_odds > 0 and selection_odds > 0:
                 # CLV = implied prob at opening - implied prob at analysis
-                # Positive = you got better odds than opening (market moved against you)
+                # Positive = opening implied prob higher (opening odds shorter)
+                # Negative = opening implied prob lower (you got shorter odds than opening)
                 clv = (1.0 / opening_odds) - (1.0 / selection_odds)
                 clv_values.append(clv)
 
