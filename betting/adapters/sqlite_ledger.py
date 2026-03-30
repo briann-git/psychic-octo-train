@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS picks (
     outcome         TEXT,
     settled_at      TEXT,
     selection_odds  REAL,
-    season          TEXT
+    season          TEXT,
+    opening_odds    REAL
 );
 
 CREATE TABLE IF NOT EXISTS skips (
@@ -79,6 +80,27 @@ CREATE INDEX IF NOT EXISTS idx_fixture_calendar_kickoff
 
 CREATE INDEX IF NOT EXISTS idx_fixture_calendar_league_kickoff
     ON fixture_calendar (league, kickoff);
+
+CREATE TABLE IF NOT EXISTS pick_signals (
+    id              TEXT PRIMARY KEY,
+    pick_id         TEXT NOT NULL,
+    agent_id        TEXT NOT NULL,
+    recommendation  TEXT NOT NULL,
+    confidence      REAL NOT NULL,
+    edge            REAL NOT NULL,
+    selection       TEXT NOT NULL,
+    reasoning       TEXT,
+    veto            INTEGER NOT NULL DEFAULT 0,
+    veto_reason     TEXT,
+    data_timestamp  TEXT NOT NULL,
+    recorded_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pick_signals_pick_id
+    ON pick_signals (pick_id);
+
+CREATE INDEX IF NOT EXISTS idx_pick_signals_agent_id
+    ON pick_signals (agent_id);
 """
 
 _MIGRATION_ADD_SETTLEMENT_COLUMNS = """
@@ -108,6 +130,9 @@ class SqliteLedgerRepository(ILedgerRepository):
             conn.execute("ALTER TABLE picks ADD COLUMN selection_odds REAL")
         if "season" not in cols:
             conn.execute("ALTER TABLE picks ADD COLUMN season TEXT")
+
+        if "opening_odds" not in cols:
+            conn.execute("ALTER TABLE picks ADD COLUMN opening_odds REAL")
 
         skip_cols = {row[1] for row in conn.execute("PRAGMA table_info(skips)")}
         if "season" not in skip_cols:
@@ -155,14 +180,17 @@ class SqliteLedgerRepository(ILedgerRepository):
         selection = verdict.selection
         selection_odds = odds.selections.get(selection, 0.0)
 
+        # Fetch opening odds from earliest odds_history snapshot
+        opening_odds = self._get_opening_odds(fixture.id, selection)
+
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO picks
                 (id, fixture_id, home_team, away_team, league, kickoff,
                  market, selection, odds, stake, confidence, expected_value,
-                 recorded_at, selection_odds, season)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 recorded_at, selection_odds, season, opening_odds)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -180,6 +208,7 @@ class SqliteLedgerRepository(ILedgerRepository):
                     datetime.now(tz=timezone.utc).isoformat(),
                     selection_odds,
                     fixture.season,
+                    opening_odds,
                 ),
             )
 
@@ -299,6 +328,55 @@ class SqliteLedgerRepository(ILedgerRepository):
             cursor = conn.execute("SELECT * FROM picks")
             cols = [desc[0] for desc in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def get_all_skips(self) -> list[dict]:
+        with self._connect() as conn:
+            cursor = conn.execute("SELECT * FROM skips")
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def record_pick_signals(
+        self,
+        pick_id: str,
+        signals: list[dict],
+    ) -> None:
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._connect() as conn:
+            for signal in signals:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO pick_signals
+                    (id, pick_id, agent_id, recommendation, confidence, edge,
+                     selection, reasoning, veto, veto_reason, data_timestamp, recorded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        pick_id,
+                        signal.get("agent_id", ""),
+                        signal.get("recommendation", ""),
+                        signal.get("confidence", 0.0),
+                        signal.get("edge", 0.0),
+                        signal.get("selection", ""),
+                        signal.get("reasoning"),
+                        int(signal.get("veto", False)),
+                        signal.get("veto_reason"),
+                        signal.get("data_timestamp", ""),
+                        now,
+                    ),
+                )
+
+    def _get_opening_odds(self, fixture_id: str, selection: str) -> float | None:
+        """
+        Returns the decimal odds for the given selection from the earliest
+        odds_history snapshot. Returns None if no history exists yet.
+        """
+        history = self.get_odds_history(fixture_id)
+        if not history:
+            return None
+        earliest = history[0]   # already ordered ASC by fetched_at
+        selections = earliest.get("selections", {})
+        return selections.get(selection)
 
     def upsert_fixture_calendar(self, fixtures: list[Fixture]) -> None:
         now = datetime.now(tz=timezone.utc).isoformat()

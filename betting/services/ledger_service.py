@@ -14,3 +14,21 @@ class LedgerService:
 
     def record(self, state: BettingState) -> None:
         self._repository.record(state)
+
+        verdict = state.get("verdict", {})
+        if verdict.get("recommendation") == "back":
+            # Collect all available signals from state
+            signals = [
+                s for s in [
+                    state.get("statistical_signal"),
+                    state.get("market_signal"),
+                ]
+                if s is not None
+            ]
+            if signals:
+                # Retrieve the pick id just written
+                pick = self._repository.get_by_fixture(
+                    state["fixture"]["id"]
+                )
+                if pick and "id" in pick:
+                    self._repository.record_pick_signals(pick["id"], signals)
