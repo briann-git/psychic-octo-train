@@ -21,7 +21,7 @@ class SelectionDefinition:
 class MarketDefinition:
     id: str
     odds_api_market_key: str
-    derived: bool
+    odds_derivation: str
     active: bool
     evaluation_strategy: str     # "ftr" | "btts" | "total"
     settlement_source: str       # "api" | "csv"
@@ -48,7 +48,7 @@ class MarketConfigLoader:
             self._markets[market_id] = MarketDefinition(
                 id=market_id,
                 odds_api_market_key=data["odds_api_market_key"],
-                derived=bool(data.get("derived", False)),
+                odds_derivation=data.get("odds_derivation", "direct"),
                 active=bool(data.get("active", False)),
                 evaluation_strategy=strategy,
                 settlement_source=data.get("settlement_source", "api"),
@@ -79,9 +79,9 @@ class MarketConfigLoader:
         market = self._markets.get(market_id)
         return market.odds_api_market_key if market else None
 
-    def is_derived(self, market_id: str) -> bool:
+    def odds_derivation(self, market_id: str) -> str:
         market = self._markets.get(market_id)
-        return market.derived if market else False
+        return market.odds_derivation if market else "direct"
 
     def settlement_source(self, market_id: str) -> str:
         market = self._markets.get(market_id)

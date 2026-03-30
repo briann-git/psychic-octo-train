@@ -1,10 +1,11 @@
 """Tests for StatisticalService."""
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from betting.config.market_config import MarketConfigLoader, MarketDefinition, SelectionDefinition
 from betting.interfaces.stats_provider import IStatsProvider
 from betting.models.fixture import Fixture
 from betting.models.odds import OddsSnapshot
@@ -130,3 +131,55 @@ class TestAnalyse:
         signal = svc.analyse(_make_fixture(), _make_odds())
         assert "home_xg" in signal.reasoning
         assert "away_xg" in signal.reasoning
+
+    def test_calculate_called_once_per_selection_with_same_matrix(self):
+        """Verify that calculator.calculate is called once per selection with the same matrix."""
+        provider = MagicMock(spec=IStatsProvider)
+        provider.get_attack_defence_ratings.return_value = (1.2, 0.9, 1.0, 1.0)
+        provider.get_league_averages.return_value = (1.5, 1.2)
+
+        market_loader = MarketConfigLoader()
+        svc = StatisticalService(stats_provider=provider, market_loader=market_loader)
+
+        with patch("betting.services.statistical_service.get_calculator") as mock_get_calc:
+            mock_calc = MagicMock()
+            mock_calc.calculate.return_value = 0.5
+            mock_get_calc.return_value = mock_calc
+
+            svc.analyse(_make_fixture(), _make_odds())
+
+        market = market_loader.get("double_chance")
+        assert mock_calc.calculate.call_count == len(market.selections)
+
+        # All calls must use the same matrix instance
+        matrices = [call.args[1] for call in mock_calc.calculate.call_args_list]
+        assert all(m is matrices[0] for m in matrices)
+
+    def test_raises_value_error_for_unregistered_strategy(self):
+        """analyse raises ValueError when market has no registered calculator."""
+        provider = MagicMock(spec=IStatsProvider)
+        provider.get_attack_defence_ratings.return_value = (1.0, 1.0, 1.0, 1.0)
+        provider.get_league_averages.return_value = (1.5, 1.2)
+
+        # Build a market definition with an unrecognised evaluation_strategy
+        bad_market = MarketDefinition(
+            id="double_chance",
+            odds_api_market_key="h2h",
+            odds_derivation="implied_sum",
+            active=True,
+            evaluation_strategy="nonexistent_strategy",
+            settlement_source="api",
+            selections=(
+                SelectionDefinition(
+                    id="1X", label="Home or Draw",
+                    wins_if="H | D", evaluation_strategy="nonexistent_strategy",
+                ),
+            ),
+        )
+        mock_loader = MagicMock(spec=MarketConfigLoader)
+        mock_loader.get.return_value = bad_market
+
+        svc = StatisticalService(stats_provider=provider, market_loader=mock_loader)
+        with pytest.raises(ValueError, match="No probability calculator"):
+            svc.analyse(_make_fixture(), _make_odds())
+
