@@ -280,13 +280,13 @@ def _run_snapshot_from_fresh(snapshot_type: str) -> None:
 
 def main() -> None:
     scheduler = BlockingScheduler()
-    scheduler.add_job(run_backup_job, "cron", hour=4, minute=0)
-    scheduler.add_job(run_morning_job, "cron", hour=8, minute=0)
+    scheduler.add_job(run_backup_job, "cron", hour=settings.backup_hour, minute=0)
+    scheduler.add_job(run_morning_job, "cron", hour=settings.morning_hour, minute=0)
     scheduler.add_job(
         lambda: _run_snapshot_from_fresh("intermediate"),
-        "cron", hour=12, minute=0,
+        "cron", hour=settings.snapshot_hour, minute=0,
     )
-    scheduler.add_job(run_analysis, "cron", hour=16, minute=0)
+    scheduler.add_job(run_analysis, "cron", hour=settings.analysis_hour, minute=0)
     scheduler.start()
 
 

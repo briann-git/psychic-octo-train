@@ -43,9 +43,13 @@ class CsvDownloadService:
             return str(dest)
         except Exception as exc:
             if dest.exists():
+                # Stale fallback — log clearly so season transition is visible
+                prev_season = self._previous_season(season)
                 logger.warning(
-                    "Download failed for %s %s (%s), returning stale cache %s",
-                    league, season, exc, dest,
+                    "Download failed for %s %s (%s). "
+                    "Falling back to stale cache — ratings will reflect %s data. "
+                    "This is expected during the season transition gap (Aug 1 – first matchday).",
+                    league, season, exc, prev_season,
                 )
                 return str(dest)
             logger.error(
@@ -115,3 +119,15 @@ class CsvDownloadService:
             return start + end
         # fallback: strip separators and take first 4 chars
         return season.replace("/", "").replace("-", "")[:4]
+
+    @staticmethod
+    def _previous_season(season: str) -> str:
+        """Returns the previous season string. '2025/26' -> '2024/25'."""
+        parts = season.replace("-", "/").split("/")
+        if len(parts) == 2:
+            try:
+                start = int(parts[0])
+                return f"{start - 1}/{(start % 100):02d}"
+            except ValueError:
+                pass
+        return "previous season"

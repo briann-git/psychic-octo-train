@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     )
     paper_trading: bool = True    # default safe — flip to false when ready to place real bets
     backup_dir: str = "/data/backups"
+    backup_hour: int = 4
+    morning_hour: int = 8
+    snapshot_hour: int = 12
+    analysis_hour: int = 16
     oci_namespace: str = ""
     oci_bucket: str = "betting-backups"
     backup_local_retention_days: int = 7
