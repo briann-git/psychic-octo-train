@@ -24,6 +24,7 @@ from betting.graph.pipeline import build_pipeline
 from betting.graph.state import BettingState
 from betting.services.backup_service import BackupService
 from betting.services.csv_download_service import CsvDownloadService
+from betting.services.fixture_calendar_service import FixtureCalendarService
 from betting.services.fixture_service import FixtureService
 from betting.services.ledger_service import LedgerService
 from betting.services.market_service import MarketService
@@ -194,6 +195,10 @@ def run_analysis() -> None:
 
     c = _build_components()
 
+    if not _has_fixtures_today(c):
+        logger.info("Analysis run skipped — no fixtures today")
+        return
+
     # Pre-download CSVs
     download_season_data(c.csv_service, c.active_leagues, c.season)
 
@@ -272,9 +277,61 @@ def run_analysis() -> None:
     logger.info("Analysis run completed")
 
 
+def run_calendar_refresh() -> None:
+    """
+    Weekly job — fetches upcoming fixtures and stores in local calendar.
+    Runs Sunday evening so the week ahead is populated before Monday.
+    """
+    logger.info("Calendar refresh started")
+    c = _build_components()
+    calendar_service = FixtureCalendarService(
+        fixture_provider=c.odds_api,
+        ledger_repo=c.ledger_repo,
+        lookahead_days=settings.calendar_lookahead_days,
+    )
+    count = calendar_service.refresh(c.active_leagues)
+    logger.info("Calendar refresh completed — %d fixture(s)", count)
+
+
+def _has_fixtures_today(c: _Components) -> bool:
+    """
+    Queries the local fixture calendar to check if there are eligible
+    fixtures in today's analysis window. No API calls.
+    Returns False and logs if the calendar appears empty or stale.
+    """
+    calendar_service = FixtureCalendarService(
+        fixture_provider=c.odds_api,
+        ledger_repo=c.ledger_repo,
+        lookahead_days=settings.calendar_lookahead_days,
+    )
+
+    if not calendar_service.has_fixtures_today(
+        leagues=c.active_leagues,
+        min_lead_hours=settings.min_lead_hours,
+        max_lead_hours=settings.max_lead_hours,
+    ):
+        upcoming = calendar_service.upcoming_fixture_dates(c.active_leagues)
+        if upcoming:
+            logger.info(
+                "No fixtures in today's window — skipping. "
+                "Next fixtures on: %s", ", ".join(upcoming)
+            )
+        else:
+            logger.warning(
+                "No fixtures in today's window and calendar appears empty. "
+                "Consider running the calendar refresh job manually."
+            )
+        return False
+
+    return True
+
+
 def _run_snapshot_from_fresh(snapshot_type: str) -> None:
     """Builds fresh components and runs a snapshot job. Used by cron lambdas."""
     c = _build_components()
+    if not _has_fixtures_today(c):
+        logger.info("Snapshot job (%s) skipped — no fixtures today", snapshot_type)
+        return
     run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, snapshot_type, c.market_loader)
 
 
@@ -287,6 +344,20 @@ def main() -> None:
         "cron", hour=settings.snapshot_hour, minute=0,
     )
     scheduler.add_job(run_analysis, "cron", hour=settings.analysis_hour, minute=0)
+    # Weekly calendar refresh — Sunday at configured hour
+    scheduler.add_job(
+        run_calendar_refresh,
+        "cron", day_of_week="sun",
+        hour=settings.calendar_refresh_hour, minute=0,
+    )
+
+    # Bootstrap calendar on first run if empty
+    logger.info("Bootstrapping fixture calendar on startup")
+    try:
+        run_calendar_refresh()
+    except Exception as exc:
+        logger.error("Calendar bootstrap failed: %s", exc)
+
     scheduler.start()
 
 

@@ -63,6 +63,22 @@ CREATE TABLE IF NOT EXISTS odds_history (
 
 CREATE INDEX IF NOT EXISTS idx_odds_history_fixture
     ON odds_history (fixture_id, fetched_at);
+
+CREATE TABLE IF NOT EXISTS fixture_calendar (
+    id              TEXT PRIMARY KEY,
+    home_team       TEXT NOT NULL,
+    away_team       TEXT NOT NULL,
+    league          TEXT NOT NULL,
+    kickoff         TEXT NOT NULL,
+    season          TEXT NOT NULL,
+    fetched_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fixture_calendar_kickoff
+    ON fixture_calendar (kickoff);
+
+CREATE INDEX IF NOT EXISTS idx_fixture_calendar_league_kickoff
+    ON fixture_calendar (league, kickoff);
 """
 
 _MIGRATION_ADD_SETTLEMENT_COLUMNS = """
@@ -281,5 +297,56 @@ class SqliteLedgerRepository(ILedgerRepository):
     def get_all_picks(self) -> list[dict]:
         with self._connect() as conn:
             cursor = conn.execute("SELECT * FROM picks")
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def upsert_fixture_calendar(self, fixtures: list[Fixture]) -> None:
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._connect() as conn:
+            # Prune past fixtures
+            conn.execute(
+                "DELETE FROM fixture_calendar WHERE kickoff < ?",
+                (datetime.now(tz=timezone.utc).isoformat(),),
+            )
+            # Upsert upcoming fixtures
+            for fixture in fixtures:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO fixture_calendar
+                    (id, home_team, away_team, league, kickoff, season, fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fixture.id,
+                        fixture.home_team,
+                        fixture.away_team,
+                        fixture.league,
+                        fixture.kickoff.isoformat(),
+                        fixture.season,
+                        now,
+                    ),
+                )
+
+    def get_calendar_fixtures(
+        self,
+        from_dt: datetime,
+        to_dt: datetime,
+        leagues: list[str] | None = None,
+    ) -> list[dict]:
+        query = """
+            SELECT * FROM fixture_calendar
+            WHERE kickoff >= ? AND kickoff <= ?
+        """
+        params: list = [from_dt.isoformat(), to_dt.isoformat()]
+
+        if leagues:
+            placeholders = ",".join("?" * len(leagues))
+            query += f" AND league IN ({placeholders})"
+            params.extend(leagues)
+
+        query += " ORDER BY kickoff ASC"
+
+        with self._connect() as conn:
+            cursor = conn.execute(query, params)
             cols = [desc[0] for desc in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]

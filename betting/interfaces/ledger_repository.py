@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -43,4 +44,25 @@ class ILedgerRepository(ABC):
     @abstractmethod
     def get_all_picks(self) -> list[dict]:
         """Returns all picks regardless of outcome."""
+        ...
+
+    @abstractmethod
+    def upsert_fixture_calendar(self, fixtures: list["Fixture"]) -> None:
+        """
+        Inserts or replaces fixtures in the calendar.
+        Prunes fixtures whose kickoff has already passed.
+        """
+        ...
+
+    @abstractmethod
+    def get_calendar_fixtures(
+        self,
+        from_dt: datetime,
+        to_dt: datetime,
+        leagues: list[str] | None = None,
+    ) -> list[dict]:
+        """
+        Returns fixtures from the calendar within the given kickoff window.
+        Optionally filtered by league.
+        """
         ...
