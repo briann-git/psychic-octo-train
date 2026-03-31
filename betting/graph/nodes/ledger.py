@@ -27,9 +27,13 @@ class LedgerNode:
         if not working_state.get("verdict"):
             errors = list(working_state.get("errors", []))
             skip_reason = errors[0] if errors else "ineligible fixture"
+            market = (
+                working_state.get("odds_snapshot", {}).get("market")
+                or (working_state.get("markets") or ["double_chance"])[0]
+            )
             stub_verdict = Verdict(
                 fixture_id=working_state["fixture"]["id"],
-                market=(working_state.get("markets") or ["double_chance"])[0],
+                market=market,
                 recommendation="skip",
                 consensus_confidence=0.0,
                 expected_value=0.0,

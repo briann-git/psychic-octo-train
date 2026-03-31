@@ -94,6 +94,60 @@ class FixtureService:
         logger.info("Total eligible fixtures: %d", len(results))
         return results
 
+    def get_eligible_fixtures_multi(
+        self,
+        markets: list[str],
+        leagues: list[str] | None = None,
+    ) -> list[tuple[Fixture, list[OddsSnapshot]]]:
+        """Return fixtures paired with an OddsSnapshot for *every* available market.
+
+        Same eligibility filters as :meth:`get_eligible_fixtures`, but instead
+        of returning the first available market it collects snapshots for all
+        requested markets that have odds.  Fixtures with no available odds for
+        any market are excluded.
+        """
+        effective_leagues = leagues if leagues is not None else self._supported_leagues
+
+        now = datetime.now(tz=timezone.utc)
+        earliest = now + timedelta(hours=self._min_lead_hours)
+        latest = now + timedelta(hours=self._max_lead_hours)
+
+        raw: list[Fixture] = self._fixture_provider.fetch_upcoming(
+            leagues=effective_leagues,
+            days_ahead=self._max_lead_hours // 24 + 1,
+        )
+
+        results: list[tuple[Fixture, list[OddsSnapshot]]] = []
+        for fixture in raw:
+            if fixture.league not in effective_leagues:
+                logger.debug("Fixture %s filtered: league %r not supported", fixture.id, fixture.league)
+                continue
+
+            kickoff = fixture.kickoff
+            if kickoff.tzinfo is None:
+                kickoff = kickoff.replace(tzinfo=timezone.utc)
+
+            if not (earliest <= kickoff <= latest):
+                logger.debug(
+                    "Fixture %s filtered: kickoff %s outside lead-time window",
+                    fixture.id, kickoff.isoformat(),
+                )
+                continue
+
+            if self._is_international_break(kickoff):
+                logger.debug("Fixture %s filtered: international break", fixture.id)
+                continue
+
+            snapshots = self._odds_provider.fetch_all_odds(fixture, markets)
+            if not snapshots:
+                logger.debug("Fixture %s filtered: no odds available for any market", fixture.id)
+                continue
+
+            results.append((fixture, snapshots))
+
+        logger.info("Total eligible fixtures (multi-market): %d", len(results))
+        return results
+
     def _is_international_break(self, kickoff: datetime) -> bool:
         for start, end in _INTERNATIONAL_BREAKS:
             if start <= kickoff <= end:
