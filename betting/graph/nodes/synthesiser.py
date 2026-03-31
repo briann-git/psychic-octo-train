@@ -22,12 +22,19 @@ class SynthesiserNode:
         ]
         signals = [Signal(**s) for s in signals_raw if s is not None]
 
+        # Derive the active market from the odds snapshot being processed,
+        # falling back to the first entry in the markets list.
+        market = (
+            state.get("odds_snapshot", {}).get("market")
+            or (state.get("markets") or ["unknown"])[0]
+        )
+
         # 1. Veto check
         for signal in signals:
             if signal.veto:
                 verdict = Verdict(
                     fixture_id=state["fixture"]["id"],
-                    market=state["markets"][0],
+                    market=market,
                     recommendation="skip",
                     consensus_confidence=0.0,
                     expected_value=0.0,
@@ -41,7 +48,7 @@ class SynthesiserNode:
         if not signals:
             verdict = Verdict(
                 fixture_id=state["fixture"]["id"],
-                market=state["markets"][0],
+                market=market,
                 recommendation="skip",
                 consensus_confidence=0.0,
                 expected_value=0.0,
@@ -59,7 +66,7 @@ class SynthesiserNode:
             # No weights configured for any active agent — treat as unweightable
             verdict = Verdict(
                 fixture_id=state["fixture"]["id"],
-                market=state["markets"][0],
+                market=market,
                 recommendation="skip",
                 consensus_confidence=0.0,
                 expected_value=0.0,
@@ -107,7 +114,7 @@ class SynthesiserNode:
 
         verdict = Verdict(
             fixture_id=state["fixture"]["id"],
-            market=state["markets"][0],
+            market=market,
             recommendation=recommendation,  # type: ignore[arg-type]
             consensus_confidence=weighted_confidence,
             expected_value=weighted_edge,

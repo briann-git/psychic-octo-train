@@ -128,26 +128,31 @@ def run_snapshot_job(
 ) -> None:
     """
     Fetches current odds for all eligible fixtures and persists to odds_history.
+    Saves one snapshot per market per fixture.
     snapshot_type: "opening" | "intermediate" | "pre_analysis"
     """
     loader = market_loader or MarketConfigLoader()
     active_market_ids = [m.id for m in loader.active_markets()]
-    eligible = fixture_service.get_eligible_fixtures(
+    eligible = fixture_service.get_eligible_fixtures_multi(
         markets=active_market_ids,
         leagues=leagues,
     )
     logger.info("Snapshot job (%s): %d fixture(s)", snapshot_type, len(eligible))
 
-    for fixture, odds in eligible:
+    for fixture, odds_list in eligible:
         effective_type = snapshot_type
         if snapshot_type == "opening":
             history = ledger_repo.get_odds_history(fixture.id)
             if any(r["snapshot_type"] == "opening" for r in history):
                 effective_type = "intermediate"
-        try:
-            ledger_repo.save_odds_snapshot(fixture, odds, effective_type)
-        except Exception as exc:
-            logger.error("Snapshot write failed for %s: %s", fixture.id, exc)
+        for odds in odds_list:
+            try:
+                ledger_repo.save_odds_snapshot(fixture, odds, effective_type)
+            except Exception as exc:
+                logger.error(
+                    "Snapshot write failed for %s market %s: %s",
+                    fixture.id, odds.market, exc,
+                )
 
 
 def run_backup_job() -> None:
@@ -236,33 +241,38 @@ def run_analysis() -> None:
 
     # Run
     active_market_ids = [m.id for m in c.market_loader.active_markets()]
-    eligible = c.fixture_service.get_eligible_fixtures(
+    eligible = c.fixture_service.get_eligible_fixtures_multi(
         markets=active_market_ids,
         leagues=leagues_today,
     )
     logger.info("Found %d eligible fixture(s)", len(eligible))
 
-    for fixture, odds in eligible:
-        logger.info(
-            "Processing %s: %s vs %s, kickoff %s",
-            fixture.id, fixture.home_team, fixture.away_team,
-            fixture.kickoff.isoformat(),
-        )
-        initial_state: BettingState = {
-            "fixture": asdict(fixture),
-            "markets": active_market_ids,
-            "odds_snapshot": asdict(odds),
-            "eligible": True,
-            "statistical_signal": None,
-            "market_signal": None,
-            "verdict": None,
-            "recorded": False,
-            "errors": [],
-        }
-        try:
-            pipeline.invoke(initial_state)
-        except Exception as exc:
-            logger.error("Unhandled error for fixture %s: %s", fixture.id, exc)
+    for fixture, odds_list in eligible:
+        for odds in odds_list:
+            logger.info(
+                "Processing %s: %s vs %s, market=%s, kickoff %s",
+                fixture.id, fixture.home_team, fixture.away_team,
+                odds.market,
+                fixture.kickoff.isoformat(),
+            )
+            initial_state: BettingState = {
+                "fixture": asdict(fixture),
+                "markets": active_market_ids,
+                "odds_snapshot": asdict(odds),
+                "eligible": True,
+                "statistical_signal": None,
+                "market_signal": None,
+                "verdict": None,
+                "recorded": False,
+                "errors": [],
+            }
+            try:
+                pipeline.invoke(initial_state)
+            except Exception as exc:
+                logger.error(
+                    "Unhandled error for fixture %s market %s: %s",
+                    fixture.id, odds.market, exc,
+                )
 
     # P&L summary
     pnl_service = PnlService(ledger_repo=c.ledger_repo)

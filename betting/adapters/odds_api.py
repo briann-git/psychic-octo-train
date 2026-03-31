@@ -69,6 +69,30 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
                 return snapshot
         return None
 
+    def fetch_all_odds(
+        self, fixture: Fixture, markets: list[str]
+    ) -> list[OddsSnapshot]:
+        """Return an OddsSnapshot for every market that has available odds.
+
+        Overrides the default implementation to avoid repeated event lookups
+        by resolving the event once and iterating markets against it.
+        """
+        sport_key = self._league_loader.odds_api_key(fixture.league)
+        if sport_key is None:
+            logger.warning("League %r not in config — cannot fetch odds", fixture.league)
+            return []
+        events = self._fetch_events(sport_key)
+        event = next((e for e in events if e["id"] == fixture.id), None)
+        if not event:
+            return []
+
+        snapshots: list[OddsSnapshot] = []
+        for market_id in markets:
+            snapshot = self._build_odds_snapshot(event, fixture.id, market_id)
+            if snapshot:
+                snapshots.append(snapshot)
+        return snapshots
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
