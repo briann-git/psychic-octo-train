@@ -101,6 +101,53 @@ CREATE INDEX IF NOT EXISTS idx_pick_signals_pick_id
 
 CREATE INDEX IF NOT EXISTS idx_pick_signals_agent_id
     ON pick_signals (agent_id);
+
+CREATE TABLE IF NOT EXISTS agent_states (
+    id                      TEXT PRIMARY KEY,
+    statistical_weight      REAL NOT NULL,
+    market_weight           REAL NOT NULL,
+    confidence_threshold    REAL NOT NULL,
+    staking_strategy        TEXT NOT NULL,
+    kelly_fraction          REAL NOT NULL DEFAULT 0.25,
+    learning_rate           REAL NOT NULL DEFAULT 0.01,
+    update_count            INTEGER NOT NULL DEFAULT 0,
+    bankroll                REAL NOT NULL,
+    starting_bankroll       REAL NOT NULL,
+    total_picks             INTEGER NOT NULL DEFAULT 0,
+    total_settled           INTEGER NOT NULL DEFAULT 0,
+    created_at              TEXT NOT NULL,
+    last_updated_at         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_picks (
+    id                  TEXT PRIMARY KEY,
+    agent_id            TEXT NOT NULL,
+    fixture_id          TEXT NOT NULL,
+    home_team           TEXT NOT NULL,
+    away_team           TEXT NOT NULL,
+    league              TEXT NOT NULL,
+    kickoff             TEXT NOT NULL,
+    season              TEXT NOT NULL,
+    market              TEXT NOT NULL,
+    selection           TEXT NOT NULL,
+    odds                REAL NOT NULL,
+    stake               REAL NOT NULL,
+    confidence          REAL NOT NULL,
+    expected_value      REAL NOT NULL,
+    statistical_weight  REAL NOT NULL,
+    market_weight       REAL NOT NULL,
+    outcome             TEXT,
+    clv                 REAL,
+    pnl                 REAL,
+    recorded_at         TEXT NOT NULL,
+    settled_at          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_picks_agent_id
+    ON agent_picks (agent_id, recorded_at);
+
+CREATE INDEX IF NOT EXISTS idx_agent_picks_fixture
+    ON agent_picks (fixture_id);
 """
 
 _MIGRATION_ADD_SETTLEMENT_COLUMNS = """
