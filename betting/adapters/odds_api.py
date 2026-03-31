@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 
@@ -178,7 +179,7 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
 
         selection_odds: dict[str, float] = {}
         for sel in market.selections:
-            price = source_prices.get(sel.label, 0.0)
+            price = self._resolve_direct_price(source_prices, sel.label, sel.outcome_name, sel.outcome_point)
             selection_odds[sel.id] = price
 
         bookmaker = source_prices.get("_bookmaker", "unknown")
@@ -202,9 +203,25 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
 
         for market in selected.get("markets", []):
             if market["key"] == market_key:
-                parsed: dict = {"_bookmaker": selected["key"]}
+                parsed: dict[str, Any] = {
+                    "_bookmaker": selected["key"],
+                    "_outcomes": [],
+                }
                 for outcome in market.get("outcomes", []):
-                    parsed[outcome["name"]] = outcome["price"]
+                    name = outcome.get("name")
+                    price = outcome.get("price")
+                    if not name or price is None:
+                        continue
+                    parsed["_outcomes"].append(
+                        {
+                            "name": name,
+                            "price": float(price),
+                            "point": outcome.get("point"),
+                        }
+                    )
+                    # Backward-compatible fallback for direct label matching
+                    if name not in parsed:
+                        parsed[name] = float(price)
                 return parsed
 
         return None
@@ -215,6 +232,43 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             "D": source_prices.get("Draw", 0.0),
             "A": source_prices.get(event["away_team"], 0.0),
         }
+
+    @staticmethod
+    def _resolve_direct_price(
+        source_prices: dict,
+        label: str,
+        outcome_name: str | None,
+        outcome_point: float | None,
+    ) -> float:
+        outcomes = source_prices.get("_outcomes", [])
+
+        if outcome_name:
+            for outcome in outcomes:
+                name = outcome.get("name")
+                price = outcome.get("price")
+                point = outcome.get("point")
+                if price is None:
+                    continue
+                if name != outcome_name:
+                    continue
+                if outcome_point is None:
+                    return float(price)
+                if point is None:
+                    continue
+                try:
+                    if float(point) == float(outcome_point):
+                        return float(price)
+                except (TypeError, ValueError):
+                    continue
+
+            # Secondary fallback when only a name is provided
+            if outcome_point is None:
+                fallback = source_prices.get(outcome_name, 0.0)
+                return float(fallback) if fallback else 0.0
+
+        # Legacy behavior (label-based)
+        fallback = source_prices.get(label, 0.0)
+        return float(fallback) if fallback else 0.0
 
     def _to_odds_snapshot(
         self,
