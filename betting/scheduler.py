@@ -460,10 +460,11 @@ def main() -> None:
         hour=settings.calendar_refresh_hour, minute=0,
     )
     # Weekly agent recalibration — Sunday before calendar refresh
+    recalibration_hour = (settings.calendar_refresh_hour - 1) % 24
     scheduler.add_job(
         run_agent_recalibration,
         "cron", day_of_week="sun",
-        hour=settings.calendar_refresh_hour - 1, minute=0,
+        hour=recalibration_hour, minute=0,
     )
 
     # Bootstrap calendar on first run if empty

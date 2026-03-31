@@ -152,7 +152,7 @@ class AgentExecutionService:
         if edge <= 0:
             return 0.0
 
-        kelly_fraction = edge * agent.policy.kelly_fraction
-        stake = kelly_fraction * agent.bankroll
+        kelly_bet_fraction = edge * agent.policy.kelly_fraction
+        stake = kelly_bet_fraction * agent.bankroll
         max_stake = agent.bankroll * 0.10
         return round(min(stake, max_stake), 2)
