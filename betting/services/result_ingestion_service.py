@@ -85,7 +85,7 @@ class ResultIngestionService:
                 summary.still_pending += 1
                 continue
 
-            outcome = self._determine_outcome(pick["selection"], pick.get("market", "double_chance"), result)
+            outcome = self._determine_outcome(pick["selection"], pick["market"], result)
             self._ledger.settle_pick(pick["id"], outcome)
 
             summary.settled += 1
