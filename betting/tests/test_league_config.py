@@ -103,8 +103,8 @@ class TestTeamNames:
 class TestDefaultYamlPath:
     def test_loads_from_default_path(self):
         loader = LeagueConfigLoader()
-        # Default path should have PL as active
-        entry = loader.get("PL")
+        # Default path should have EPL as active
+        entry = loader.get("EPL")
         assert entry is not None
         assert entry.football_data_code == "E0"
         assert entry.active is True

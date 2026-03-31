@@ -37,7 +37,7 @@ _SAMPLE_YAML = {
             {"id": "no", "label": "Neither Team to Score", "wins_if": "btts_no"},
         ],
     },
-    "over_under_25": {
+    "goals_over_under_25": {
         "active": False,
         "odds_api_market_key": "totals",
         "odds_derivation": "direct",
@@ -47,11 +47,15 @@ _SAMPLE_YAML = {
             {
                 "id": "over_25",
                 "label": "Over 2.5 Goals",
+                "outcome_name": "Over",
+                "outcome_point": 2.5,
                 "wins_if": {"columns": ["fthg", "ftag"], "operator": ">", "threshold": 2.5},
             },
             {
                 "id": "under_25",
                 "label": "Under 2.5 Goals",
+                "outcome_name": "Under",
+                "outcome_point": 2.5,
                 "wins_if": {"columns": ["fthg", "ftag"], "operator": "<=", "threshold": 2.5},
             },
         ],
@@ -81,7 +85,7 @@ class TestActiveMarkets:
     def test_inactive_market_not_included(self, loader):
         active_ids = [m.id for m in loader.active_markets()]
         assert "btts" not in active_ids
-        assert "over_under_25" not in active_ids
+        assert "goals_over_under_25" not in active_ids
 
 
 class TestGet:
@@ -131,11 +135,23 @@ class TestSelections:
         assert loader.get_selection("nonexistent", "1X") is None
 
     def test_total_selection_has_dict_wins_if(self, loader):
-        sel = loader.get_selection("over_under_25", "over_25")
+        sel = loader.get_selection("goals_over_under_25", "over_25")
         assert isinstance(sel.wins_if, dict)
         assert sel.wins_if["columns"] == ["fthg", "ftag"]
         assert sel.wins_if["operator"] == ">"
         assert sel.wins_if["threshold"] == 2.5
+
+    def test_total_selection_parses_outcome_name_and_point(self, loader):
+        sel = loader.get_selection("goals_over_under_25", "over_25")
+        assert sel is not None
+        assert sel.outcome_name == "Over"
+        assert sel.outcome_point == 2.5
+
+    def test_legacy_selection_defaults_optional_outcome_fields_to_none(self, loader):
+        sel = loader.get_selection("double_chance", "1X")
+        assert sel is not None
+        assert sel.outcome_name is None
+        assert sel.outcome_point is None
 
 
 class TestOddsApiMarketKey:

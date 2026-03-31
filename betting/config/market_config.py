@@ -6,7 +6,7 @@ from typing import Union
 
 import yaml
 
-_DEFAULT_YAML_PATH = os.path.join(os.path.dirname(__file__), "markets.yaml")
+_DEFAULT_YAML_PATH = os.environ.get("BETTING_MARKETS_CONFIG", "config/markets.yaml")
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,8 @@ class SelectionDefinition:
     label: str
     wins_if: Union[str, dict]    # str for ftr/btts, dict for total
     evaluation_strategy: str     # inherited from parent market
+    outcome_name: str | None = None
+    outcome_point: float | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,12 @@ class MarketConfigLoader:
                     label=s["label"],
                     wins_if=s["wins_if"],       # passed through as-is
                     evaluation_strategy=strategy,
+                    outcome_name=s.get("outcome_name"),
+                    outcome_point=(
+                        float(s["outcome_point"])
+                        if s.get("outcome_point") is not None
+                        else None
+                    ),
                 )
                 for s in data.get("selections", [])
             )

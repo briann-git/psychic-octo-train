@@ -1,0 +1,195 @@
+# League configuration
+# --------------------
+# Each top-level key is the internal league identifier used throughout
+# the pipeline (fixture.league, CSV downloads, Odds API lookups,
+# team name normalisation).
+#
+# Fields:
+#   football_data_code  — league code on football-data.co.uk
+#                         used to construct the CSV download URL:
+#                         https://www.football-data.co.uk/mmz4281/{season}/{code}.csv
+#   odds_api_key        — sport key on The Odds API
+#                         used for fixture, odds, and results endpoints
+#   active              — whether this league is included in pipeline runs
+#                         set to false until team_names is populated from live data
+#   team_names          — maps football-data.co.uk team names to The Odds API names
+#                         the two sources use different conventions (e.g. "Man City"
+#                         vs "Manchester City"). populate by watching WARNING logs
+#                         for unmatched team names on first live run.
+#                         leave as {} for inactive leagues.
+#
+# Adding a new league:
+#   1. Add a block with active: false
+#   2. Set active: true
+#   3. Run the pipeline and watch for WARNING logs: "team not found in ratings"
+#   4. Add each unmatched name to team_names
+#   5. Re-run to confirm clean
+
+EPL:
+  football_data_code: "E0"
+  odds_api_key: "soccer_epl"
+  active: true
+  team_names: {
+    "Brighton": "Brighton and Hove Albion",
+    "Leeds": "Leeds United",
+    "Man City": "Manchester City",
+    "Man United": "Manchester United",
+    "Newcastle": "Newcastle United",
+    "Nott'm Forest": "Nottingham Forest",
+    "Tottenham": "Tottenham Hotspur",
+    "West Ham": "West Ham United"
+  }
+
+EFL_Championship:
+  football_data_code: "E1"
+  odds_api_key: "soccer_efl_champ"
+  active: true
+  team_names: {
+    "Birmingham": "Birmingham City",
+    "Blackburn": "Blackburn Rovers",
+    "Charlton": "Charlton Athletic",
+    "Coventry": "Coventry City",
+    "Derby": "Derby County",
+    "Hull": "Hull City",
+    "Ipswich": "Ipswich Town",
+    "Leicester": "Leicester City",
+    "Norwich": "Norwich City",
+    "Oxford": "Oxford United",
+    "Preston": "Preston North End",
+    "Sheffield Weds": "Sheffield Wednesday",
+    "Stoke": "Stoke City",
+    "Swansea": "Swansea City",
+    "West Brom": "West Bromwich Albion",
+    "Wrexham": "Wrexham AFC"
+  }
+
+Bundesliga1:
+  football_data_code: "D1"
+  odds_api_key: "soccer_germany_bundesliga"
+  active: true
+  team_names: {
+    "Dortmund": "Borussia Dortmund",
+    "Ein Frankfurt": "Eintracht Frankfurt",
+    "FC Koln": "1. FC Köln",
+    "Freiburg": "SC Freiburg",
+    "Hamburg": "Hamburger SV",
+    "Heidenheim": "1. FC Heidenheim",
+    "Hoffenheim": "TSG Hoffenheim",
+    "Leverkusen": "Bayer Leverkusen",
+    "Mainz": "FSV Mainz 05",
+    "St Pauli": "FC St. Pauli",
+    "Stuttgart": "VfB Stuttgart",
+    "Wolfsburg": "VfL Wolfsburg"
+  }
+
+Bundesliga2:
+  football_data_code: "D2"
+  odds_api_key: "soccer_germany_bundesliga2"
+  active: true
+  team_names: {
+    "Bielefeld": "Arminia Bielefeld",
+    "Bochum": "VfL Bochum",
+    "Braunschweig": "Eintracht Braunschweig",
+    "Darmstadt": "SV Darmstadt 98",
+    "Dresden": "Dynamo Dresden",
+    "Fortuna Dusseldorf": "Fortuna Düsseldorf",
+    "Greuther Furth": "Greuther Fürth",
+    "Hannover": "Hannover 96",
+    "Hertha": "Hertha Berlin",
+    "Kaiserslautern": "1. FC Kaiserslautern",
+    "Karlsruhe": "Karlsruher SC",
+    "Magdeburg": "1. FC Magdeburg",
+    "Nurnberg": "1. FC Nürnberg",
+    "Paderborn": "SC Paderborn",
+    "Preußen Münster": "SC Preußen Münster",
+    "Schalke 04": "FC Schalke 04"
+  }
+
+Ligue1:
+  football_data_code: "F1"
+  odds_api_key: "soccer_france_ligue_one"
+  active: true
+  team_names: {
+    "Lens": "RC Lens",
+    "Monaco": "AS Monaco",
+    "Paris SG": "Paris FC"
+  }
+
+Ligue2:
+  football_data_code: "F2"
+  odds_api_key: "soccer_france_ligue_two"
+  active: true
+  team_names: {
+    "Annecy": "Annecy FC",
+    "Bastia": "SC Bastia",
+    "Dunkerque": "USL Dunkerque",
+    "Laval": "Stade Lavallois",
+    "Le Mans": "Le Mans FC",
+    "Reims": "Stade de Reims",
+    "Rodez": "Rodez AF",
+    "St Etienne": "Saint Etienne"
+  }
+
+La_Liga:
+  football_data_code: "SP1"
+  odds_api_key: "soccer_spain_la_liga"
+  active: true
+  team_names: {
+    "Alaves": "Alavés",
+    "Ath Bilbao": "Athletic Bilbao",
+    "Ath Madrid": "Real Madrid",
+    "Betis": "Real Betis",
+    "Celta": "Celta Vigo",
+    "Elche": "Elche CF",
+    "Espanol": "Espanyol",
+    "Osasuna": "CA Osasuna",
+    "Sociedad": "Real Sociedad",
+    "Vallecano": "Rayo Vallecano"
+  }
+
+La_Liga2:
+  football_data_code: "SP2"
+  odds_api_key: "soccer_spain_segunda_division"
+  active: true
+  team_names: {
+    "Almeria": "Almería",
+    "Andorra": "Andorra CF",
+    "Burgos": "Burgos CF",
+    "Cadiz": "Cádiz CF",
+    "Castellon": "CD Castellón",
+    "Ceuta": "AD Ceuta FC",
+    "Cordoba": "Córdoba",
+    "Eibar": "SD Eibar",
+    "Granada": "Granada CF",
+    "Huesca": "SD Huesca",
+    "La Coruna": "Deportivo La Coruña",
+    "Leganes": "Leganés",
+    "Malaga": "Málaga",
+    "Mirandes": "CD Mirandés",
+    "Santander": "Real Racing Club de Santander",
+    "Sociedad B": "Real Sociedad B",
+    "Sp Gijon": "Sporting Gijón",
+    "Valladolid": "Real Valladolid CF"
+  }
+
+Serie_A:
+  football_data_code: "I1"
+  odds_api_key: "soccer_italy_serie_a"
+  active: true
+  team_names: {
+    "Atalanta": "Atalanta BC",
+    "Inter": "Inter Milan",
+    "Milan": "AC Milan",
+    "Roma": "AS Roma",
+    "Verona": "Hellas Verona"
+  }
+
+Serie_B:
+  football_data_code: "I2"
+  odds_api_key: "soccer_italy_serie_b"
+  active: true
+  team_names: {
+    "Catanzaro": "US Catanzaro 1929",
+    "Cesena": "Cesena FC",
+    "Sudtirol": "Südtirol"
+  }

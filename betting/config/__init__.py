@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     agent_weights: dict[str, float] = Field(
         default={"statistical": 0.60, "market": 0.40}
     )
+    leagues_config: str = "config/leagues.yaml"
+    markets_config: str = "config/markets.yaml"
     paper_trading: bool = True    # default safe — flip to false when ready to place real bets
     backup_dir: str = "/data/backups"
     backup_hour: int = 4

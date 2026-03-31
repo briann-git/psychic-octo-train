@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import yaml
 
 
-_DEFAULT_YAML_PATH = os.path.join(os.path.dirname(__file__), "leagues.yaml")
+_DEFAULT_YAML_PATH = os.environ.get("BETTING_LEAGUES_CONFIG", "config/leagues.yaml")
 
 
 @dataclass(frozen=True)
