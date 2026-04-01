@@ -67,6 +67,7 @@ class AgentExecutionService:
 
         # 6. Record pick
         selection_odds = odds.selections.get(verdict.selection, 0.0)
+        signal_map = self._signal_map(signals)
         self._repo.record_agent_pick(agent.id, {
             "fixture_id": fixture.id,
             "home_team": fixture.home_team,
@@ -82,6 +83,10 @@ class AgentExecutionService:
             "expected_value": weighted_edge,
             "statistical_weight": agent.policy.statistical_weight,
             "market_weight": agent.policy.market_weight,
+            "stat_confidence": signal_map.get("statistical", {}).get("confidence"),
+            "stat_edge": signal_map.get("statistical", {}).get("edge"),
+            "market_confidence": signal_map.get("market", {}).get("confidence"),
+            "market_edge": signal_map.get("market", {}).get("edge"),
         })
 
         logger.info(
@@ -138,6 +143,11 @@ class AgentExecutionService:
         if agent.policy.staking_strategy == "kelly":
             return self._kelly_stake(agent, edge, odds)
         return self._flat_stake
+
+    @staticmethod
+    def _signal_map(signals: list[dict]) -> dict[str, dict]:
+        """Index signals by agent_id for quick lookup."""
+        return {s.get("agent_id", ""): s for s in signals}
 
     def _kelly_stake(
         self,

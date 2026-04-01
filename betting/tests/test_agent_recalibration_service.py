@@ -48,6 +48,10 @@ def _make_settled_pick(
     stat_weight: float = 0.80,
     market_weight: float = 0.20,
     confidence: float = 0.75,
+    stat_confidence: float | None = 0.80,
+    stat_edge: float | None = 0.10,
+    market_confidence: float | None = 0.70,
+    market_edge: float | None = 0.05,
 ) -> dict:
     return {
         "outcome": outcome,
@@ -55,6 +59,10 @@ def _make_settled_pick(
         "statistical_weight": stat_weight,
         "market_weight": market_weight,
         "confidence": confidence,
+        "stat_confidence": stat_confidence,
+        "stat_edge": stat_edge,
+        "market_confidence": market_confidence,
+        "market_edge": market_edge,
     }
 
 
@@ -110,9 +118,13 @@ class TestStatGradient:
         agent = _make_agent(stat_weight=0.50, market_weight=0.50)
         repo = MagicMock(spec=AgentRepository)
         repo.get_all_agents.return_value = [agent]
-        # All picks have positive CLV and high stat weight
+        # Statistical signal was more confident on winning picks
         picks = [
-            _make_settled_pick(clv=0.10, stat_weight=0.80, market_weight=0.20)
+            _make_settled_pick(
+                clv=0.10,
+                stat_confidence=0.85,
+                market_confidence=0.60,
+            )
             for _ in range(10)
         ]
         repo.get_settled_since.return_value = picks
@@ -122,8 +134,8 @@ class TestStatGradient:
         service.recalibrate_all(since=since)
 
         saved_agent = repo.save_agent.call_args[0][0]
-        # Stat weight should have increased (positive gradient from positive CLV)
-        # After normalisation, stat_weight should be > market_weight
+        # Stat weight should have increased because stat signal was more
+        # confident on picks with positive reward (differential gradient)
         assert saved_agent.policy.statistical_weight > saved_agent.policy.market_weight
 
 
@@ -132,8 +144,13 @@ class TestMarketGradient:
         agent = _make_agent(stat_weight=0.50, market_weight=0.50)
         repo = MagicMock(spec=AgentRepository)
         repo.get_all_agents.return_value = [agent]
+        # Market signal was more confident on winning picks
         picks = [
-            _make_settled_pick(clv=0.10, stat_weight=0.20, market_weight=0.80)
+            _make_settled_pick(
+                clv=0.10,
+                stat_confidence=0.55,
+                market_confidence=0.85,
+            )
             for _ in range(10)
         ]
         repo.get_settled_since.return_value = picks
@@ -175,8 +192,15 @@ class TestParametersClipped:
         )
         repo = MagicMock(spec=AgentRepository)
         repo.get_all_agents.return_value = [agent]
-        # All positive — pushes weights further in same direction
-        picks = [_make_settled_pick(clv=1.0, stat_weight=0.90, market_weight=0.10) for _ in range(10)]
+        # All positive — stat more confident → pushes stat weight further up
+        picks = [
+            _make_settled_pick(
+                clv=1.0,
+                stat_confidence=0.95,
+                market_confidence=0.40,
+            )
+            for _ in range(10)
+        ]
         repo.get_settled_since.return_value = picks
 
         service = AgentRecalibrationService(agent_repo=repo)
@@ -204,3 +228,118 @@ class TestUpdateCountIncremented:
 
         saved_agent = repo.save_agent.call_args[0][0]
         assert saved_agent.policy.update_count == 3
+
+
+class TestDifferentialGradient:
+    """Verifies the gradient uses signal-level differential, not weight reinforcement."""
+
+    def test_equal_signals_produce_zero_weight_gradient(self):
+        """When both signals have equal confidence, no weight update should occur."""
+        agent = _make_agent(stat_weight=0.50, market_weight=0.50, learning_rate=0.1)
+        repo = MagicMock(spec=AgentRepository)
+        repo.get_all_agents.return_value = [agent]
+        # Both signals equally confident — differential is zero
+        picks = [
+            _make_settled_pick(
+                clv=0.10,
+                stat_confidence=0.80,
+                market_confidence=0.80,
+            )
+            for _ in range(10)
+        ]
+        repo.get_settled_since.return_value = picks
+
+        service = AgentRecalibrationService(agent_repo=repo)
+        since = datetime.now(tz=timezone.utc) - timedelta(days=7)
+        service.recalibrate_all(since=since)
+
+        saved_agent = repo.save_agent.call_args[0][0]
+        # Weights should remain equal after normalisation
+        assert abs(saved_agent.policy.statistical_weight - 0.50) < 0.01
+        assert abs(saved_agent.policy.market_weight - 0.50) < 0.01
+
+    def test_wrong_signal_penalised_on_loss(self):
+        """If the stat signal was more confident on a losing bet, stat weight decreases."""
+        agent = _make_agent(stat_weight=0.50, market_weight=0.50, learning_rate=0.1)
+        repo = MagicMock(spec=AgentRepository)
+        repo.get_all_agents.return_value = [agent]
+        # Stat was more confident, but the bet lost → stat should be penalised
+        picks = [
+            _make_settled_pick(
+                clv=-0.10,
+                stat_confidence=0.90,
+                market_confidence=0.50,
+            )
+            for _ in range(10)
+        ]
+        repo.get_settled_since.return_value = picks
+
+        service = AgentRecalibrationService(agent_repo=repo)
+        since = datetime.now(tz=timezone.utc) - timedelta(days=7)
+        service.recalibrate_all(since=since)
+
+        saved_agent = repo.save_agent.call_args[0][0]
+        # Stat weight should have decreased
+        assert saved_agent.policy.statistical_weight < saved_agent.policy.market_weight
+
+
+class TestSymmetricThresholdGradient:
+    """Verifies the threshold gradient is symmetric — rewards winners, penalises losers."""
+
+    def test_winners_decrease_threshold(self):
+        """Winning picks should push threshold down (be less conservative)."""
+        agent = _make_agent(threshold=0.70, learning_rate=0.1)
+        repo = MagicMock(spec=AgentRepository)
+        repo.get_all_agents.return_value = [agent]
+        picks = [
+            _make_settled_pick(clv=0.10)
+            for _ in range(10)
+        ]
+        repo.get_settled_since.return_value = picks
+
+        service = AgentRecalibrationService(agent_repo=repo)
+        since = datetime.now(tz=timezone.utc) - timedelta(days=7)
+        service.recalibrate_all(since=since)
+
+        saved_agent = repo.save_agent.call_args[0][0]
+        # All winners → threshold should decrease from 0.70
+        assert saved_agent.policy.confidence_threshold < 0.70
+
+    def test_losers_increase_threshold(self):
+        """Losing picks should push threshold up (be more conservative)."""
+        agent = _make_agent(threshold=0.62, learning_rate=0.1)
+        repo = MagicMock(spec=AgentRepository)
+        repo.get_all_agents.return_value = [agent]
+        picks = [
+            _make_settled_pick(clv=-0.10)
+            for _ in range(10)
+        ]
+        repo.get_settled_since.return_value = picks
+
+        service = AgentRecalibrationService(agent_repo=repo)
+        since = datetime.now(tz=timezone.utc) - timedelta(days=7)
+        service.recalibrate_all(since=since)
+
+        saved_agent = repo.save_agent.call_args[0][0]
+        # All losers → threshold should increase from 0.62
+        assert saved_agent.policy.confidence_threshold > 0.62
+
+    def test_balanced_outcomes_stable_threshold(self):
+        """Equal wins and losses should leave threshold roughly unchanged."""
+        agent = _make_agent(threshold=0.65, learning_rate=0.1)
+        repo = MagicMock(spec=AgentRepository)
+        repo.get_all_agents.return_value = [agent]
+        # 5 winners, 5 losers with equal magnitude
+        picks = (
+            [_make_settled_pick(clv=0.10) for _ in range(5)]
+            + [_make_settled_pick(clv=-0.10) for _ in range(5)]
+        )
+        repo.get_settled_since.return_value = picks
+
+        service = AgentRecalibrationService(agent_repo=repo)
+        since = datetime.now(tz=timezone.utc) - timedelta(days=7)
+        service.recalibrate_all(since=since)
+
+        saved_agent = repo.save_agent.call_args[0][0]
+        # Net gradient is zero → threshold should remain close to 0.65
+        assert abs(saved_agent.policy.confidence_threshold - 0.65) < 0.01

@@ -209,3 +209,20 @@ class TestPickRecordedWithPolicySnapshot:
         assert pick["fixture_id"] == "fix-001"
         assert pick["selection"] == "1X"
         assert pick["market"] == "double_chance"
+
+    def test_pick_includes_per_signal_data(self):
+        agent = _make_agent(threshold=0.50)
+        service, repo = _make_service([agent])
+        signals = _make_signals(
+            stat_confidence=0.85,
+            market_confidence=0.70,
+            stat_edge=0.12,
+            market_edge=0.06,
+        )
+        service.execute(_make_verdict(), _make_fixture(), _make_odds(), signals)
+        repo.record_agent_pick.assert_called_once()
+        pick = repo.record_agent_pick.call_args[0][1]
+        assert pick["stat_confidence"] == 0.85
+        assert pick["market_confidence"] == 0.70
+        assert pick["stat_edge"] == 0.12
+        assert pick["market_edge"] == 0.06

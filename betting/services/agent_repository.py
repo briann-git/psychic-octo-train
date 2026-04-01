@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS agent_picks (
     expected_value      REAL NOT NULL,
     statistical_weight  REAL NOT NULL,
     market_weight       REAL NOT NULL,
+    stat_confidence     REAL,
+    stat_edge           REAL,
+    market_confidence   REAL,
+    market_edge         REAL,
     outcome             TEXT,
     clv                 REAL,
     pnl                 REAL,
@@ -64,6 +68,14 @@ class AgentRepository:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(_AGENT_DDL)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Applies schema migrations guarded by column existence checks."""
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_picks)")}
+        for col in ("stat_confidence", "stat_edge", "market_confidence", "market_edge"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE agent_picks ADD COLUMN {col} REAL")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
@@ -127,8 +139,9 @@ class AgentRepository:
                 (id, agent_id, fixture_id, home_team, away_team, league,
                  kickoff, season, market, selection, odds, stake,
                  confidence, expected_value, statistical_weight,
-                 market_weight, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 market_weight, stat_confidence, stat_edge,
+                 market_confidence, market_edge, recorded_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -147,6 +160,10 @@ class AgentRepository:
                     pick["expected_value"],
                     pick["statistical_weight"],
                     pick["market_weight"],
+                    pick.get("stat_confidence"),
+                    pick.get("stat_edge"),
+                    pick.get("market_confidence"),
+                    pick.get("market_edge"),
                     now,
                 ),
             )

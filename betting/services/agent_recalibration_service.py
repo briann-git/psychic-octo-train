@@ -102,10 +102,15 @@ class AgentRecalibrationService:
         """
         Computes policy gradients from pick history and rewards.
 
-        stat_gradient:      positive = statistical signal was more predictive
-        market_gradient:    positive = market signal was more predictive
-        threshold_gradient: positive = threshold should increase (too many losers)
-                            negative = threshold should decrease (missing winners)
+        Weight gradients use *differential* signal confidence: the gradient
+        pushes weight toward whichever signal was more confident on picks that
+        produced positive reward, and away from it on negative reward.  This
+        learns which signal is genuinely more predictive rather than simply
+        reinforcing the existing weight distribution.
+
+        Threshold gradient is symmetric: winning picks push the threshold
+        down (take more bets like this) while losing picks push it up
+        (be more selective).
         """
         if not picks or not rewards:
             return 0.0, 0.0, 0.0
@@ -115,14 +120,21 @@ class AgentRecalibrationService:
         threshold_gradient = 0.0
 
         for pick, reward in zip(picks, rewards):
-            stat_weight_used = pick.get("statistical_weight", 0.5)
-            market_weight_used = pick.get("market_weight", 0.5)
+            stat_conf = pick.get("stat_confidence")
+            market_conf = pick.get("market_confidence")
 
-            stat_gradient += reward * stat_weight_used
-            market_gradient += reward * market_weight_used
+            if stat_conf is not None and market_conf is not None:
+                # Differential: positive when this signal was more confident
+                diff = stat_conf - market_conf
+                stat_gradient += reward * diff
+                market_gradient += reward * (-diff)
+            # else: legacy picks without per-signal data — contribute zero
+            #       gradient (safe no-op during migration)
 
-            # Threshold gradient: if reward negative, threshold was too low
-            threshold_gradient += -reward * (1.0 if reward < 0 else 0.0)
+            # Symmetric threshold gradient:
+            # won (reward > 0) → negative gradient → lower threshold (back more)
+            # lost (reward < 0) → positive gradient → raise threshold (back less)
+            threshold_gradient += -reward
 
         n = len(picks)
         return stat_gradient / n, market_gradient / n, threshold_gradient / n
