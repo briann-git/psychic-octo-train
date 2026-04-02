@@ -7,9 +7,8 @@ import Badge from '../components/primitives/Badge';
 import AgentTag from '../components/primitives/AgentTag';
 import Sparkline from '../components/primitives/Sparkline';
 import WeightBar from '../components/primitives/WeightBar';
-import Pulse from '../components/primitives/Pulse';
 import useApi from '../hooks/useApi';
-import { fetchStatus, fetchAgents, fetchPicks, fetchFixtures } from '../api/endpoints';
+import { fetchStatus, fetchAgents, fetchPicks, fetchFixtures, fetchJobs } from '../api/endpoints';
 
 export default function OverviewPage({ profileId }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -17,6 +16,7 @@ export default function OverviewPage({ profileId }) {
   const { data: agents }   = useApi(useCallback(() => fetchAgents(profileId), [profileId]),   { interval: 30000 });
   const { data: picks }    = useApi(useCallback(() => fetchPicks({ limit: 6, profileId }), [profileId]), { interval: 30000 });
   const { data: fixtures } = useApi(useCallback(() => fetchFixtures({ date: today }), [today]), { interval: 60000 });
+  const { data: jobs }     = useApi(fetchJobs, { interval: 60000 });
 
   const allAgents = agents || [];
   const allPicks  = picks  || [];
@@ -27,10 +27,6 @@ export default function OverviewPage({ profileId }) {
   const totalBankroll = allAgents.reduce((s, a) => s + (a.bankroll || 0), 0);
   const netPnl = allAgents.reduce((s, a) => s + ((a.bankroll || 0) - (a.starting_bankroll || 1000)), 0);
   const winRate = settled.length ? Math.round(won / settled.length * 100) : 0;
-
-  const jobs = status ? [
-    { label: 'Scheduler', running: status.scheduler_running, time: status.last_run },
-  ] : [];
 
   const metrics = [
     { label: 'Total Bankroll', value: allAgents.length ? `£${totalBankroll.toFixed(2)}` : '—', color: tokens.colors.green, spark: [50,65,45,80,60,90,55,85,70,100] },
@@ -151,18 +147,22 @@ export default function OverviewPage({ profileId }) {
         </Card>
 
         <Card>
-          <CardTitle>Live Status</CardTitle>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-            <Pulse color={status?.scheduler_running ? tokens.colors.green : tokens.colors.red} />
-            <span style={{ fontSize: 12, color: tokens.colors.muted }}>
-              {status?.scheduler_running ? 'Pipeline running' : 'Pipeline stopped'}
-            </span>
-          </div>
-          {status?.uptime && (
-            <div style={{ fontSize: 11, color: tokens.colors.muted, marginTop: 8 }}>
-              Started: {new Date(status.uptime).toLocaleString()}
-            </div>
-          )}
+          <CardTitle>Scheduled Jobs</CardTitle>
+          {(jobs || []).length ? (jobs || []).map(j => {
+            const next = j.next_run ? new Date(j.next_run) : null;
+            const now = Date.now();
+            const diffMs = next ? next.getTime() - now : 0;
+            const diffH = Math.floor(diffMs / 3_600_000);
+            const diffM = Math.floor((diffMs % 3_600_000) / 60_000);
+            const eta = diffMs > 0 ? (diffH > 0 ? `${diffH}h ${diffM}m` : `${diffM}m`) : 'due';
+            return (
+              <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${tokens.colors.border}`, fontSize: 12 }}>
+                <span style={{ flex: 1 }}>{j.label}</span>
+                <span style={{ fontSize: 10, color: tokens.colors.muted, flexShrink: 0 }}>{j.schedule}</span>
+                <span style={{ fontSize: 10, color: tokens.colors.amber, flexShrink: 0, minWidth: 50, textAlign: 'right' }}>{eta}</span>
+              </div>
+            );
+          }) : <div style={{ color: tokens.colors.muted, fontSize: 12 }}>Loading…</div>}
         </Card>
       </div>
     </div>
