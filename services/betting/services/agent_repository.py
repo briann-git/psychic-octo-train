@@ -322,9 +322,14 @@ class AgentRepository:
 
     def bootstrap_agents(self, profile_id: str = "default-paper", bankroll_start: float = 1000.0) -> None:
         """
-        Creates the four agents with starting policies if they don't exist.
-        Called once on first run. Idempotent — skips agents that already exist.
+        Creates four default agents if the profile has no agents at all.
+        Called once on first run. Skips entirely if agents already exist
+        (e.g. profiles created via the wizard with custom agent configs).
         """
+        existing = self.get_all_agents(profile_id)
+        if existing:
+            return
+
         now = datetime.now(tz=timezone.utc)
         default_agents = [
             Agent(
@@ -382,9 +387,7 @@ class AgentRepository:
             ),
         ]
         for agent in default_agents:
-            existing = self.get_agent(agent.id, profile_id)
-            if not existing:
-                self.save_agent(agent, profile_id)
+            self.save_agent(agent, profile_id)
 
     @staticmethod
     def _row_to_agent(row: dict) -> Agent:
