@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Shell from './components/layout/Shell';
 import OverviewPage  from './pages/OverviewPage';
 import PicksFeedPage from './pages/PicksFeedPage';
@@ -21,9 +21,28 @@ const PAGES = {
   settings:  SettingsPage,
 };
 
+function getInitialPage() {
+  const hash = window.location.hash.replace('#', '');
+  return PAGES[hash] ? hash : 'overview';
+}
+
 export default function App() {
-  const [page, setPage] = useState('overview');
+  const [page, setPageState] = useState(getInitialPage);
   const { mode, loading, switching, toggleMode, setMode } = useTradingMode();
+
+  const setPage = useCallback((p) => {
+    setPageState(p);
+    window.location.hash = p;
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (PAGES[hash]) setPageState(hash);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   // Sidebar summary data from PnL endpoint
   const { data: pnlData } = useApi(fetchPnl, { interval: 60000 });
