@@ -7,14 +7,15 @@ const NAV = [
   { id: 'agents',    icon: '⬡', label: 'Agents' },
   { id: 'fixtures',  icon: '▦', label: 'Fixtures' },
   { id: 'logs',      icon: '≡', label: 'Logs' },
-  { id: 'settings',  icon: '⚙', label: 'Settings' },
+  { id: 'profiles',  icon: '◉', label: 'Profiles' },
+  { id: 'system',    icon: '⚙', label: 'System' },
 ];
 
-export default function Sidebar({ page, setPage, mode, activeProfile, sidebarData }) {
+export default function Sidebar({ page, setPage, mode, viewedProfile, sidebarData }) {
   const modeColor = mode === 'live' ? tokens.colors.green : mode === 'backtest' ? (tokens.colors.cyan ?? '#67e8f9') : tokens.colors.amber;
   const modeDim   = mode === 'live' ? tokens.colors.greenDim : mode === 'backtest' ? (tokens.colors.cyanDim ?? 'rgba(103,232,249,.08)') : tokens.colors.amberDim;
   const { netPnl = null, totalPicks = null, quotaUsed = null, quotaTotal = null } = sidebarData || {};
-  const profileLabel = activeProfile ? activeProfile.name : (mode === 'paper' ? 'Paper Trading' : mode === 'live' ? 'Live Trading' : 'Backtest');
+  const profileLabel = viewedProfile ? viewedProfile.name : (mode === 'paper' ? 'Paper Trading' : mode === 'live' ? 'Live Trading' : 'Backtest');
 
   return (
     <div style={{

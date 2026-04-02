@@ -6,7 +6,8 @@ import PnLPage       from './pages/PnLPage';
 import AgentsPage    from './pages/AgentsPage';
 import FixturesPage  from './pages/FixturesPage';
 import LogsPage      from './pages/LogsPage';
-import SettingsPage  from './pages/SettingsPage';
+import ProfilesPage  from './pages/ProfilesPage';
+import SystemPage    from './pages/SystemPage';
 import useProfiles from './hooks/useProfiles';
 import useApi from './hooks/useApi';
 import { fetchPnl } from './api/endpoints';
@@ -18,7 +19,8 @@ const PAGES = {
   agents:    AgentsPage,
   fixtures:  FixturesPage,
   logs:      LogsPage,
-  settings:  SettingsPage,
+  profiles:  ProfilesPage,
+  system:    SystemPage,
 };
 
 function getInitialPage() {
@@ -29,11 +31,11 @@ function getInitialPage() {
 export default function App() {
   const [page, setPageState] = useState(getInitialPage);
   const {
-    profiles, activeProfile, mode, loading, switching,
-    switchProfile, createProfile, removeProfile, reload: reloadProfiles,
+    profiles, viewedProfile, mode, loading,
+    selectProfile, toggleActive, createProfile, removeProfile, reload: reloadProfiles,
   } = useProfiles();
 
-  const profileId = activeProfile ? activeProfile.id : null;
+  const profileId = viewedProfile ? viewedProfile.id : null;
 
   const setPage = useCallback((p) => {
     setPageState(p);
@@ -73,17 +75,17 @@ export default function App() {
       setPage={setPage}
       mode={mode}
       profiles={profiles}
-      activeProfile={activeProfile}
-      switchProfile={switchProfile}
-      switching={switching}
+      viewedProfile={viewedProfile}
+      selectProfile={selectProfile}
       sidebarData={sidebarData}
     >
       <PageComponent
         mode={mode}
         profileId={profileId}
         profiles={profiles}
-        activeProfile={activeProfile}
-        switchProfile={switchProfile}
+        viewedProfile={viewedProfile}
+        selectProfile={selectProfile}
+        toggleActive={toggleActive}
         createProfile={createProfile}
         removeProfile={removeProfile}
         reloadProfiles={reloadProfiles}
