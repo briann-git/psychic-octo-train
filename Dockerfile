@@ -11,10 +11,10 @@ RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --only main
 
 # Copy source
-COPY betting/ ./betting/
+COPY services/betting/ ./betting/
 
 # Persistent data directories — mount these as volumes
-RUN mkdir -p /data/db /data/csv_cache
+RUN mkdir -p /data/db /data/csv_cache /data/logs /data/heartbeat
 
 ENV PYTHONUNBUFFERED=1
 

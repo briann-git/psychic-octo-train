@@ -3,6 +3,7 @@ name = "betting"
 version = "0.1.0"
 description = "Autonomous football betting pipeline spine"
 authors = []
+packages = [{include = "betting", from = "services"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
