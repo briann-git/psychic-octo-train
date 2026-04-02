@@ -1,11 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 
-export default function useSSE(url = '/api/logs/stream', { maxLines = 200 } = {}) {
+export default function useSSE(url = '/api/logs/stream', { maxLines = 200, enabled = true } = {}) {
   const [lines, setLines]         = useState([]);
   const [connected, setConnected] = useState(false);
   const esRef = useRef(null);
 
   useEffect(() => {
+    if (!enabled) {
+      esRef.current?.close();
+      setConnected(false);
+      return;
+    }
     function connect() {
       const es = new EventSource(url);
       esRef.current = es;
@@ -28,7 +33,7 @@ export default function useSSE(url = '/api/logs/stream', { maxLines = 200 } = {}
     }
     connect();
     return () => { esRef.current?.close(); setConnected(false); };
-  }, [url, maxLines]);
+  }, [url, maxLines, enabled]);
 
   return { lines, connected };
 }
