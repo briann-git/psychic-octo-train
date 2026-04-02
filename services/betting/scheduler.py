@@ -3,7 +3,9 @@ Entry point for the autonomous football betting pipeline.
 Runs via APScheduler on a daily cron schedule.
 """
 
+import json
 import logging
+import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -440,12 +442,34 @@ def _run_snapshot_from_fresh(snapshot_type: str) -> None:
     )
 
 
+HEARTBEAT_DIR = os.environ.get("HEARTBEAT_DIR", "/data/heartbeat")
+HEARTBEAT_FILE = os.path.join(HEARTBEAT_DIR, "scheduler.json")
+
+
+def send_heartbeat() -> None:
+    """Write a heartbeat JSON file so the dashboard knows we are alive."""
+    os.makedirs(HEARTBEAT_DIR, exist_ok=True)
+    payload = {
+        "service": "scheduler",
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "status": "running",
+    }
+    tmp_path = HEARTBEAT_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    os.replace(tmp_path, HEARTBEAT_FILE)
+
+
 def main() -> None:
     # Bootstrap agents on first run
     agent_repo = AgentRepository(db_path=settings.db_path)
     agent_repo.bootstrap_agents()
 
     scheduler = BlockingScheduler()
+
+    # Heartbeat every 10 minutes so dashboard can verify we are alive
+    scheduler.add_job(send_heartbeat, "interval", minutes=10, next_run_time=datetime.now(tz=timezone.utc))
+
     scheduler.add_job(run_backup_job, "cron", hour=settings.backup_hour, minute=0)
     scheduler.add_job(run_morning_job, "cron", hour=settings.morning_hour, minute=0)
     scheduler.add_job(

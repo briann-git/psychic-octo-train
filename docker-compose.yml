@@ -10,6 +10,26 @@ services:
       - ./data/db:/data/db
       - ./data/csv_cache:/data/csv_cache
       - ./data/backups:/data/backups
+      - ./data/logs:/data/logs
+      - ./data/heartbeat:/data/heartbeat
     environment:
       DB_PATH: /data/db/ledger.db
       CSV_CACHE_DIR: /data/csv_cache
+
+  dashboard:
+    build:
+      context: ./services
+      dockerfile: Dockerfile.dashboard
+    restart: always
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/db:/data/db:ro
+      - ./data/logs:/data/logs:ro
+      - ./data/heartbeat:/data/heartbeat:ro
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/db/ledger.db
+    depends_on:
+      - scheduler

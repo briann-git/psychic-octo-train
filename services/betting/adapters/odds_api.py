@@ -121,10 +121,11 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            safe_url = str(exc.request.url).split("apiKey")[0] + "apiKey=REDACTED"
             logger.error(
                 "HTTP error from Odds API — status %s, url %s",
                 exc.response.status_code,
-                exc.request.url,
+                safe_url,
             )
             raise
 

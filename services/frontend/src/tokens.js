@@ -1,0 +1,46 @@
+const tokens = {
+  colors: {
+    bg: "#0b0e11",
+    surface: "#141a21",
+    surface2: "#1a2230",
+    surface3: "#222b39",
+    border: "#263040",
+    border2: "#334155",
+    text: "#f0f2f5",
+    muted: "#94a3b8",
+    dim: "#475569",
+    green: "#00ff88",
+    greenDim: "rgba(0,255,136,0.10)",
+    greenMid: "rgba(0,255,136,0.18)",
+    red: "#ff4455",
+    redDim: "rgba(255,68,85,0.10)",
+    amber: "#ffaa00",
+    amberDim: "rgba(255,170,0,0.10)",
+    blue: "#4488ff",
+    blueDim: "rgba(68,136,255,0.10)",
+    paperAccent: "#ffaa00",
+    paperDim: "rgba(255,170,0,0.08)",
+    liveAccent: "#00ff88",
+    liveDim: "rgba(0,255,136,0.08)",
+  },
+  fonts: {
+    mono: "'IBM Plex Mono', monospace",
+    sans: "'IBM Plex Sans', sans-serif",
+  },
+  spacing: {
+    xs: 4,
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 24,
+  },
+  fontSize: {
+    xs: 10,
+    sm: 11,
+    md: 12,
+    base: 13,
+    lg: 14,
+  },
+};
+
+export default tokens;
