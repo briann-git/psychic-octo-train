@@ -229,10 +229,10 @@ async def update_config(request: Request):
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str):
     # Prevent path traversal
+    static_root = STATIC_DIR.resolve()
     try:
-        target = (STATIC_DIR / full_path).resolve()
-        STATIC_DIR.resolve()
-        target.relative_to(STATIC_DIR.resolve())
+        target = (static_root / full_path).resolve()
+        target.relative_to(static_root)
     except (ValueError, Exception):
         raise HTTPException(status_code=404)
 
@@ -240,7 +240,7 @@ async def serve_spa(full_path: str):
         mime, _ = mimetypes.guess_type(str(target))
         return FileResponse(str(target), media_type=mime or "application/octet-stream")
 
-    index = STATIC_DIR / "index.html"
+    index = static_root / "index.html"
     if index.is_file():
         return FileResponse(str(index), media_type="text/html")
 
