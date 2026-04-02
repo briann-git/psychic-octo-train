@@ -14,6 +14,8 @@ from fastapi.responses import StreamingResponse, FileResponse
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
+_API_KEY_RE = re.compile(r'(apiKey=)[^&\s]+', re.IGNORECASE)
+
 DB_PATH = os.environ.get("DB_PATH", "/data/db/ledger.db")
 LOG_DIR = os.environ.get("LOG_DIR", "/data/logs")
 LOG_FILE = os.path.join(LOG_DIR, "scheduler.log")
@@ -94,8 +96,9 @@ def get_status():
 def get_agents():
     try:
         with get_db() as conn:
-            agents = rows_to_dicts(conn.execute("SELECT * FROM agent_states ORDER BY agent_id").fetchall())
+            agents = rows_to_dicts(conn.execute("SELECT * FROM agent_states ORDER BY id").fetchall())
             for a in agents:
+                a["agent_id"] = a.pop("id", a.get("agent_id"))
                 aid = a["agent_id"]
                 s = conn.execute("""
                     SELECT COUNT(*) total,
@@ -203,7 +206,11 @@ def get_fixtures(
             if date:
                 q += " AND DATE(kickoff)=?"; p.append(date)
             q += " ORDER BY kickoff"
-            return rows_to_dicts(conn.execute(q, p).fetchall())
+            rows = rows_to_dicts(conn.execute(q, p).fetchall())
+            for r in rows:
+                r["home"] = r.pop("home_team", "")
+                r["away"] = r.pop("away_team", "")
+            return rows
     except Exception:
         return []
 
@@ -219,7 +226,12 @@ _LOG_RE = re.compile(
 def _parse_log_line(line: str) -> dict | None:
     m = _LOG_RE.match(line)
     if m:
-        return {"time": m.group(1), "level": m.group(2), "source": m.group(3), "message": m.group(4)}
+        return {
+            "time": m.group(1),
+            "level": m.group(2),
+            "source": m.group(3),
+            "message": _API_KEY_RE.sub(r'\1REDACTED', m.group(4)),
+        }
     return None
 
 
@@ -417,6 +429,10 @@ async def serve_spa(full_path: str):
 
     index = static_root / "index.html"
     if index.is_file():
-        return FileResponse(str(index), media_type="text/html")
+        return FileResponse(
+            str(index),
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     raise HTTPException(status_code=404)
