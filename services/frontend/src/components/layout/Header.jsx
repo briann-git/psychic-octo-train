@@ -8,7 +8,7 @@ const TYPE_COLORS = {
   backtest: { fg: tokens.colors.cyan ?? '#67e8f9', bg: tokens.colors.cyanDim ?? 'rgba(103,232,249,.08)', glow: 'paperGlow' },
 };
 
-export default function Header({ mode, profiles, activeProfile, switchProfile, switching }) {
+export default function Header({ mode, profiles, viewedProfile, selectProfile }) {
   const [time, setTime] = useState('');
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -57,20 +57,19 @@ export default function Header({ mode, profiles, activeProfile, switchProfile, s
         {/* Profile selector dropdown */}
         <div ref={ref} style={{ position: 'relative' }}>
           <div
-            onClick={switching ? undefined : () => setOpen(o => !o)}
+            onClick={() => setOpen(o => !o)}
             style={{
               display: 'flex', alignItems: 'center', gap: tokens.spacing.sm,
               padding: '5px 14px',
               border: `1px solid ${tc.fg}`,
               background: tc.bg,
-              cursor: switching ? 'wait' : 'pointer',
+              cursor: 'pointer',
               animation: `${tc.glow} 3s ease-in-out infinite`,
-              opacity: switching ? 0.6 : 1,
             }}
           >
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: tc.fg, animation: 'pulse 1.5s infinite' }} />
             <span style={{ fontSize: tokens.fontSize.sm, letterSpacing: '.2em', textTransform: 'uppercase', color: tc.fg, fontWeight: 600 }}>
-              {activeProfile ? activeProfile.name : mode}
+              {viewedProfile ? viewedProfile.name : mode}
             </span>
             <span style={{ fontSize: 9, color: tc.fg, marginLeft: 2 }}>▾</span>
           </div>
@@ -83,19 +82,22 @@ export default function Header({ mode, profiles, activeProfile, switchProfile, s
             }}>
               {(profiles || []).map(p => {
                 const ptc = TYPE_COLORS[p.type] || TYPE_COLORS.paper;
-                const isActive = activeProfile && p.id === activeProfile.id;
+                const isViewed = viewedProfile && p.id === viewedProfile.id;
                 return (
                   <div
                     key={p.id}
-                    onClick={() => { if (!isActive) { switchProfile(p.id); setOpen(false); } }}
+                    onClick={() => { if (!isViewed) { selectProfile(p.id); setOpen(false); } }}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '8px 12px', cursor: isActive ? 'default' : 'pointer',
-                      background: isActive ? ptc.bg : 'transparent',
-                      borderLeft: `3px solid ${isActive ? ptc.fg : 'transparent'}`,
+                      padding: '8px 12px', cursor: isViewed ? 'default' : 'pointer',
+                      background: isViewed ? ptc.bg : 'transparent',
+                      borderLeft: `3px solid ${isViewed ? ptc.fg : 'transparent'}`,
                     }}
                   >
-                    <span style={{ fontSize: 12, color: isActive ? ptc.fg : tokens.colors.text }}>{p.name}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {p.is_active && <div style={{ width: 5, height: 5, borderRadius: '50%', background: tokens.colors.green, animation: 'pulse 1.5s infinite' }} />}
+                      <span style={{ fontSize: 12, color: isViewed ? ptc.fg : tokens.colors.text }}>{p.name}</span>
+                    </div>
                     <span style={{
                       fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase',
                       padding: '2px 6px', border: `1px solid ${ptc.fg}`, color: ptc.fg, background: ptc.bg,

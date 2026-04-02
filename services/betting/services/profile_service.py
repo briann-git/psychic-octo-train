@@ -52,6 +52,12 @@ class ProfileService:
         profile.is_active = True
         return profile
 
+    def toggle_profile(self, profile_id: str) -> Profile:
+        """Toggle is_active for a single profile (multi-active support)."""
+        new_val = self._profiles.toggle_active(profile_id)
+        profile = self._profiles.get(profile_id)
+        return profile
+
     def list_profiles(self) -> list[Profile]:
         return self._profiles.list_all()
 

@@ -185,12 +185,14 @@ def run_morning_job() -> None:
     logger.info("Morning job started")
     c = _build_components()
 
-    # Resolve active profile
+    # Resolve all active profiles
     profile_repo = ProfileRepository(db_path=settings.db_path)
-    profile = profile_repo.get_active()
-    profile_id = profile.id if profile else "default-paper"
+    active_profiles = profile_repo.get_all_active()
+    if not active_profiles:
+        logger.warning("Morning job skipped — no active profiles")
+        return
 
-    # 1. Settle pending picks from Odds API
+    # 1. Settle pending picks per profile
     agent_repo = AgentRepository(db_path=settings.db_path)
     result_service = ResultIngestionService(
         odds_api=c.odds_api,
@@ -199,18 +201,21 @@ def run_morning_job() -> None:
         csv_service=c.csv_service,
         agent_repo=agent_repo,
     )
-    settlement = result_service.settle_pending_picks(
-        c.active_leagues,
-        season=c.season,
-        profile_id=profile_id,
-    )
-    logger.info(
-        "Settlement complete — settled: %d, won: %d, lost: %d, void: %d, still_pending: %d",
-        settlement.settled, settlement.won, settlement.lost,
-        settlement.void, settlement.still_pending,
-    )
+    for profile in active_profiles:
+        logger.info("Settlement for profile %s (%s)", profile.name, profile.id)
+        settlement = result_service.settle_pending_picks(
+            c.active_leagues,
+            season=c.season,
+            profile_id=profile.id,
+        )
+        logger.info(
+            "Settlement complete [%s] — settled: %d, won: %d, lost: %d, void: %d, still_pending: %d",
+            profile.name,
+            settlement.settled, settlement.won, settlement.lost,
+            settlement.void, settlement.still_pending,
+        )
 
-    # 2. Opening snapshot
+    # 2. Opening snapshot (shared across profiles)
     run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "opening", c.market_loader)
     logger.info("Morning job completed")
 
@@ -220,24 +225,22 @@ def run_analysis() -> None:
 
     c = _build_components()
 
-    # Resolve active profile
+    # Resolve all active profiles
     profile_repo = ProfileRepository(db_path=settings.db_path)
-    profile = profile_repo.get_active()
-    profile_id = profile.id if profile else "default-paper"
-    profile_type = profile.type if profile else "paper"
+    active_profiles = profile_repo.get_all_active()
+    if not active_profiles:
+        logger.warning("Analysis run skipped — no active profiles")
+        return
 
     leagues_today = _get_active_leagues_today(c)
     if not leagues_today:
         logger.info("Analysis run skipped — no fixtures today")
         return
 
-    # Pre-download CSVs
+    # Shared prep (not profile-specific)
     download_season_data(c.csv_service, leagues_today, c.season)
-
-    # Pre-analysis snapshot
     run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "pre_analysis", c.market_loader, leagues=leagues_today)
 
-    # Services
     statistical_service = StatisticalService(
         stats_provider=c.stats_provider,
         market_loader=c.market_loader,
@@ -247,28 +250,7 @@ def run_analysis() -> None:
         market_loader=c.market_loader,
     )
     ledger_service = LedgerService(repository=c.ledger_repo)
-
-    # Agent execution
     agent_repo = AgentRepository(db_path=settings.db_path)
-    agent_execution_service = AgentExecutionService(
-        agent_repo=agent_repo,
-        flat_stake=settings.flat_stake,
-        profile_id=profile_id,
-    )
-
-    # Graph
-    pipeline = build_pipeline(
-        ingest_node=IngestNode(c.fixture_service),
-        statistical_node=StatisticalNode(statistical_service),
-        market_node=MarketNode(market_service),
-        synthesiser_node=SynthesiserNode(
-            weights=settings.agent_weights,
-            confidence_threshold=settings.confidence_threshold,
-        ),
-        ledger_node=LedgerNode(ledger_service, profile_id=profile_id, profile_type=profile_type),
-    )
-
-    # Run
     active_market_ids = [m.id for m in c.market_loader.active_markets()]
     eligible = c.fixture_service.get_eligible_fixtures_multi(
         markets=active_market_ids,
@@ -276,55 +258,90 @@ def run_analysis() -> None:
     )
     logger.info("Found %d eligible fixture(s)", len(eligible))
 
-    for fixture, odds_list in eligible:
-        for odds in odds_list:
-            logger.info(
-                "Processing %s: %s vs %s, market=%s, kickoff %s",
-                fixture.id, fixture.home_team, fixture.away_team,
-                odds.market,
-                fixture.kickoff.isoformat(),
-            )
-            initial_state: BettingState = {
-                "fixture": asdict(fixture),
-                "markets": active_market_ids,
-                "odds_snapshot": asdict(odds),
-                "eligible": True,
-                "statistical_signal": None,
-                "market_signal": None,
-                "verdict": None,
-                "recorded": False,
-                "errors": [],
-            }
-            try:
-                final_state = pipeline.invoke(initial_state)
+    # Run pipeline per active profile
+    for profile in active_profiles:
+        profile_id = profile.id
+        profile_type = profile.type
+        logger.info("Analysis for profile %s (%s, %s)", profile.name, profile_id, profile_type)
 
-                # Dispatch to bandit agents
-                verdict_dict = final_state.get("verdict")
-                if verdict_dict and verdict_dict.get("recommendation") == "back":
-                    from betting.models.verdict import Verdict as VerdictModel
-                    verdict = VerdictModel.from_dict(verdict_dict)
-                    signals = [
-                        s for s in [
-                            final_state.get("statistical_signal"),
-                            final_state.get("market_signal"),
-                        ]
-                        if s is not None
-                    ]
-                    agent_execution_service.execute(verdict, fixture, odds, signals)
-            except Exception as exc:
-                logger.error(
-                    "Unhandled error for fixture %s market %s: %s",
-                    fixture.id, odds.market, exc,
+        agent_execution_service = AgentExecutionService(
+            agent_repo=agent_repo,
+            flat_stake=settings.flat_stake,
+            profile_id=profile_id,
+        )
+
+        pipeline = build_pipeline(
+            ingest_node=IngestNode(c.fixture_service),
+            statistical_node=StatisticalNode(statistical_service),
+            market_node=MarketNode(market_service),
+            synthesiser_node=SynthesiserNode(
+                weights=settings.agent_weights,
+                confidence_threshold=settings.confidence_threshold,
+            ),
+            ledger_node=LedgerNode(ledger_service, profile_id=profile_id, profile_type=profile_type),
+        )
+
+        for fixture, odds_list in eligible:
+            for odds in odds_list:
+                logger.info(
+                    "[%s] Processing %s: %s vs %s, market=%s, kickoff %s",
+                    profile.name,
+                    fixture.id, fixture.home_team, fixture.away_team,
+                    odds.market,
+                    fixture.kickoff.isoformat(),
                 )
+                initial_state: BettingState = {
+                    "fixture": asdict(fixture),
+                    "markets": active_market_ids,
+                    "odds_snapshot": asdict(odds),
+                    "eligible": True,
+                    "statistical_signal": None,
+                    "market_signal": None,
+                    "verdict": None,
+                    "recorded": False,
+                    "errors": [],
+                }
+                try:
+                    final_state = pipeline.invoke(initial_state)
 
-    # P&L summary
-    pnl_service = PnlService(ledger_repo=c.ledger_repo)
-    summary = pnl_service.compute(profile_id=profile_id)
+                    verdict_dict = final_state.get("verdict")
+                    if verdict_dict and verdict_dict.get("recommendation") == "back":
+                        from betting.models.verdict import Verdict as VerdictModel
+                        verdict = VerdictModel.from_dict(verdict_dict)
+                        signals = [
+                            s for s in [
+                                final_state.get("statistical_signal"),
+                                final_state.get("market_signal"),
+                            ]
+                            if s is not None
+                        ]
+                        agent_execution_service.execute(verdict, fixture, odds, signals)
+                except Exception as exc:
+                    logger.error(
+                        "[%s] Unhandled error for fixture %s market %s: %s",
+                        profile.name, fixture.id, odds.market, exc,
+                    )
+
+        # P&L summary for this profile
+        _log_profile_pnl(c.ledger_repo, agent_repo, profile)
+
+    logger.info("Analysis run completed")
+
+
+def _log_profile_pnl(
+    ledger_repo: SqliteLedgerRepository,
+    agent_repo: AgentRepository,
+    profile,
+) -> None:
+    """Log P&L summary and per-agent stats for a single profile."""
+    pnl_service = PnlService(ledger_repo=ledger_repo)
+    summary = pnl_service.compute(profile_id=profile.id)
     logger.info(
-        "P&L summary — picks: %d (settled: %d, pending: %d) | "
+        "[%s] P&L — picks: %d (settled: %d, pending: %d) | "
         "won: %d lost: %d void: %d | "
         "win_rate: %.1f%% | staked: %.2f | net: %.2f | ROI: %.1f%% | "
         "CLV: %s",
+        profile.name,
         summary.total_picks,
         summary.settled,
         summary.pending,
@@ -340,13 +357,14 @@ def run_analysis() -> None:
 
     if summary.skip_reasons:
         logger.info(
-            "Skips today — total: %d | %s",
+            "[%s] Skips — total: %d | %s",
+            profile.name,
             summary.total_skips,
             " | ".join(f"{k}: {v}" for k, v in sorted(summary.skip_reasons.items())),
         )
 
     if summary.calibration_buckets:
-        logger.info("Confidence calibration (settled picks):")
+        logger.info("[%s] Confidence calibration (settled picks):", profile.name)
         for bucket in summary.calibration_buckets:
             win_rate_str = (
                 f"{bucket['win_rate'] * 100:.1f}%"
@@ -358,13 +376,13 @@ def run_analysis() -> None:
                 bucket["range"], bucket["picks"], bucket["won"], win_rate_str,
             )
 
-    # Per-agent P&L
-    agents = agent_repo.get_all_agents(profile_id=profile_id)
+    agents = agent_repo.get_all_agents(profile_id=profile.id)
     for agent in agents:
         roi = ((agent.bankroll - agent.starting_bankroll) / agent.starting_bankroll) * 100
         logger.info(
-            "Agent %s — bankroll: %.2f (ROI: %+.1f%%) | picks: %d | "
+            "[%s] Agent %s — bankroll: %.2f (ROI: %+.1f%%) | picks: %d | "
             "policy: stat=%.2f mkt=%.2f threshold=%.2f updates=%d",
+            profile.name,
             agent.id,
             agent.bankroll,
             roi,
@@ -375,8 +393,6 @@ def run_analysis() -> None:
             agent.policy.update_count,
         )
 
-    logger.info("Analysis run completed")
-
 
 def run_agent_recalibration() -> None:
     """Weekly agent recalibration — runs after Sunday settlement."""
@@ -384,13 +400,17 @@ def run_agent_recalibration() -> None:
     agent_repo = AgentRepository(db_path=settings.db_path)
     recalibration_service = AgentRecalibrationService(agent_repo=agent_repo)
 
-    # Resolve active profile
+    # Resolve all active profiles
     profile_repo = ProfileRepository(db_path=settings.db_path)
-    profile = profile_repo.get_active()
-    profile_id = profile.id if profile else "default-paper"
+    active_profiles = profile_repo.get_all_active()
+    if not active_profiles:
+        logger.warning("Agent recalibration skipped — no active profiles")
+        return
 
     since = datetime.now(tz=timezone.utc) - timedelta(days=7)
-    recalibration_service.recalibrate_all(since=since, profile_id=profile_id)
+    for profile in active_profiles:
+        logger.info("Recalibrating agents for profile %s", profile.name)
+        recalibration_service.recalibrate_all(since=since, profile_id=profile.id)
     logger.info("Agent recalibration completed")
 
 
@@ -481,13 +501,11 @@ def send_heartbeat() -> None:
 
 
 def main() -> None:
-    # Bootstrap agents on first run for the active profile
+    # Bootstrap agents on first run for all active profiles
     agent_repo = AgentRepository(db_path=settings.db_path)
     profile_repo = ProfileRepository(db_path=settings.db_path)
-    profile = profile_repo.get_active()
-    profile_id = profile.id if profile else "default-paper"
-    bankroll_start = profile.bankroll_start if profile else 1000.0
-    agent_repo.bootstrap_agents(profile_id=profile_id, bankroll_start=bankroll_start)
+    for profile in profile_repo.get_all_active():
+        agent_repo.bootstrap_agents(profile_id=profile.id, bankroll_start=profile.bankroll_start)
 
     scheduler = BlockingScheduler()
 

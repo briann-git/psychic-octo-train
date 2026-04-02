@@ -78,6 +78,7 @@ class ProfileRepository:
         return self._row_to_profile(dict(zip(cols, row)))
 
     def get_active(self) -> Profile | None:
+        """Return first active profile (legacy convenience)."""
         with self._connect() as conn:
             cursor = conn.execute(
                 "SELECT * FROM profiles WHERE is_active = 1 LIMIT 1"
@@ -88,6 +89,16 @@ class ProfileRepository:
             return None
         return self._row_to_profile(dict(zip(cols, row)))
 
+    def get_all_active(self) -> list[Profile]:
+        """Return every profile that the scheduler should process."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM profiles WHERE is_active = 1 ORDER BY created_at ASC"
+            )
+            cols = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+        return [self._row_to_profile(dict(zip(cols, row))) for row in rows]
+
     def list_all(self) -> list[Profile]:
         with self._connect() as conn:
             cursor = conn.execute("SELECT * FROM profiles ORDER BY created_at ASC")
@@ -96,11 +107,27 @@ class ProfileRepository:
         return [self._row_to_profile(dict(zip(cols, row))) for row in rows]
 
     def set_active(self, profile_id: str) -> None:
+        """Exclusive activation — deactivate all, activate one. Legacy."""
         with self._connect() as conn:
             conn.execute("UPDATE profiles SET is_active = 0")
             conn.execute(
                 "UPDATE profiles SET is_active = 1 WHERE id = ?", (profile_id,)
             )
+
+    def toggle_active(self, profile_id: str) -> bool:
+        """Flip is_active for one profile. Returns the new is_active value."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT is_active FROM profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Profile {profile_id!r} not found")
+            new_val = 0 if row[0] else 1
+            conn.execute(
+                "UPDATE profiles SET is_active = ? WHERE id = ?",
+                (new_val, profile_id),
+            )
+        return bool(new_val)
 
     def update(self, profile: Profile) -> Profile:
         with self._connect() as conn:

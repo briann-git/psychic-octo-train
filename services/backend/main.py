@@ -244,8 +244,8 @@ def activate_profile(profile_id: str):
         row = rw_conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Profile not found")
-        rw_conn.execute("UPDATE profiles SET is_active = 0")
-        rw_conn.execute("UPDATE profiles SET is_active = 1 WHERE id = ?", (profile_id,))
+        new_val = 0 if row["is_active"] else 1
+        rw_conn.execute("UPDATE profiles SET is_active = ? WHERE id = ?", (new_val, profile_id))
         rw_conn.commit()
         return dict(rw_conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone())
     except HTTPException:
