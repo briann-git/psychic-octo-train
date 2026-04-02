@@ -11,11 +11,11 @@ import Pulse from '../components/primitives/Pulse';
 import useApi from '../hooks/useApi';
 import { fetchStatus, fetchAgents, fetchPicks, fetchFixtures } from '../api/endpoints';
 
-export default function OverviewPage() {
+export default function OverviewPage({ profileId }) {
   const today = new Date().toISOString().slice(0, 10);
   const { data: status }   = useApi(fetchStatus,   { interval: 15000 });
-  const { data: agents }   = useApi(fetchAgents,   { interval: 30000 });
-  const { data: picks }    = useApi(useCallback(() => fetchPicks({ limit: 6 }), []), { interval: 30000 });
+  const { data: agents }   = useApi(useCallback(() => fetchAgents(profileId), [profileId]),   { interval: 30000 });
+  const { data: picks }    = useApi(useCallback(() => fetchPicks({ limit: 6, profileId }), [profileId]), { interval: 30000 });
   const { data: fixtures } = useApi(useCallback(() => fetchFixtures({ date: today }), [today]), { interval: 60000 });
 
   const allAgents = agents || [];

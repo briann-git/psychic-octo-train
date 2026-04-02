@@ -9,9 +9,9 @@ import { fetchPicks } from '../api/endpoints';
 
 const STATUSES = ['all', 'won', 'lost', 'pending'];
 
-export default function PicksFeedPage() {
+export default function PicksFeedPage({ profileId }) {
   const [filter, setFilter] = useState('all');
-  const { data, loading } = useApi(useCallback(() => fetchPicks({ limit: 200 }), []), { interval: 30000 });
+  const { data, loading } = useApi(useCallback(() => fetchPicks({ limit: 200, profileId }), [profileId]), { interval: 30000 });
 
   const picks = data || [];
   const filtered = filter === 'all' ? picks : filter === 'pending'

@@ -7,7 +7,7 @@ import AgentsPage    from './pages/AgentsPage';
 import FixturesPage  from './pages/FixturesPage';
 import LogsPage      from './pages/LogsPage';
 import SettingsPage  from './pages/SettingsPage';
-import useTradingMode from './hooks/useTradingMode';
+import useProfiles from './hooks/useProfiles';
 import useApi from './hooks/useApi';
 import { fetchPnl } from './api/endpoints';
 
@@ -28,7 +28,12 @@ function getInitialPage() {
 
 export default function App() {
   const [page, setPageState] = useState(getInitialPage);
-  const { mode, loading, switching, toggleMode, setMode } = useTradingMode();
+  const {
+    profiles, activeProfile, mode, loading, switching,
+    switchProfile, createProfile, removeProfile, reload: reloadProfiles,
+  } = useProfiles();
+
+  const profileId = activeProfile ? activeProfile.id : null;
 
   const setPage = useCallback((p) => {
     setPageState(p);
@@ -44,8 +49,9 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  // Sidebar summary data from PnL endpoint
-  const { data: pnlData } = useApi(fetchPnl, { interval: 60000 });
+  // Sidebar summary data from PnL endpoint — scoped to active profile
+  const pnlFetcher = useCallback(() => fetchPnl(profileId), [profileId]);
+  const { data: pnlData } = useApi(pnlFetcher, { interval: 60000 });
   const sidebarData = {
     netPnl:    pnlData ? pnlData.agents.reduce((s, a) => s + (a.net_pnl || 0), 0) : null,
     totalPicks: pnlData ? pnlData.agents.reduce((s, a) => s + (a.total_picks || 0), 0) : null,
@@ -66,11 +72,22 @@ export default function App() {
       page={page}
       setPage={setPage}
       mode={mode}
-      toggleMode={toggleMode}
+      profiles={profiles}
+      activeProfile={activeProfile}
+      switchProfile={switchProfile}
       switching={switching}
       sidebarData={sidebarData}
     >
-      <PageComponent mode={mode} setMode={setMode} />
+      <PageComponent
+        mode={mode}
+        profileId={profileId}
+        profiles={profiles}
+        activeProfile={activeProfile}
+        switchProfile={switchProfile}
+        createProfile={createProfile}
+        removeProfile={removeProfile}
+        reloadProfiles={reloadProfiles}
+      />
     </Shell>
   );
 }

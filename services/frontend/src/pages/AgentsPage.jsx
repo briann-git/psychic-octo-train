@@ -6,8 +6,10 @@ import WeightBar from '../components/primitives/WeightBar';
 import useApi from '../hooks/useApi';
 import { fetchAgents } from '../api/endpoints';
 
-export default function AgentsPage() {
-  const { data, loading } = useApi(fetchAgents, { interval: 30000 });
+import { useCallback } from 'react';
+
+export default function AgentsPage({ profileId }) {
+  const { data, loading } = useApi(useCallback(() => fetchAgents(profileId), [profileId]), { interval: 30000 });
   const agents = data || [];
 
   return (
