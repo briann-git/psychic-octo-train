@@ -12,3 +12,4 @@ build/
 data/
 .venv/
 venv/
+node_modules/
