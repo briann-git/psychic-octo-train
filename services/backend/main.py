@@ -75,6 +75,7 @@ def get_status():
         "last_run": None,
         "uptime": heartbeat.get("timestamp") if heartbeat else None,
         "db_size": None,
+        "active_profile": None,
     }
 
     if os.path.exists(DB_PATH):
@@ -86,28 +87,175 @@ def get_status():
             row = conn.execute("SELECT MAX(recorded_at) AS lr FROM agent_picks").fetchone()
             if row and row["lr"]:
                 result["last_run"] = row["lr"]
+            # Include active profile
+            profile_row = conn.execute(
+                "SELECT * FROM profiles WHERE is_active = 1 LIMIT 1"
+            ).fetchone()
+            if profile_row:
+                result["active_profile"] = dict(profile_row)
     except Exception:
         pass
 
     return result
 
 
-@app.get("/api/agents")
-def get_agents():
+def _resolve_profile_id(conn, profile: str | None) -> str | None:
+    """Resolve profile_id from query param or fall back to active profile."""
+    if profile:
+        return profile
+    row = conn.execute("SELECT id FROM profiles WHERE is_active = 1 LIMIT 1").fetchone()
+    return row["id"] if row else None
+
+
+@app.get("/api/profiles")
+def list_profiles():
     try:
         with get_db() as conn:
-            agents = rows_to_dicts(conn.execute("SELECT * FROM agent_states ORDER BY id").fetchall())
+            return rows_to_dicts(conn.execute("SELECT * FROM profiles ORDER BY created_at ASC").fetchall())
+    except Exception:
+        return []
+
+
+@app.post("/api/profiles")
+async def create_profile(request: Request):
+    body = await request.json()
+    name = body.get("name")
+    profile_type = body.get("type", "paper")
+    bankroll_start = body.get("bankroll_start", 1000.0)
+
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if profile_type not in ("paper", "live", "backtest"):
+        raise HTTPException(status_code=400, detail="type must be paper, live, or backtest")
+
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+    profile_id = str(_uuid.uuid4())
+    now = _dt.now(tz=_tz.utc).isoformat()
+
+    # Write profile — uses a separate RW connection
+    rw_conn = sqlite3.connect(DB_PATH, timeout=10)
+    rw_conn.row_factory = sqlite3.Row
+    try:
+        rw_conn.execute(
+            "INSERT INTO profiles (id, name, type, bankroll_start, is_active, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+            (profile_id, name, profile_type, bankroll_start, now),
+        )
+        # Bootstrap 4 agents for this profile
+        from betting.models.agent import BanditPolicy
+        agent_defaults = [
+            ("A", 0.80, 0.20, 0.62, "flat", 0.25),
+            ("B", 0.40, 0.60, 0.65, "flat", 0.25),
+            ("C", 0.60, 0.40, 0.70, "flat", 0.25),
+            ("D", 0.50, 0.50, 0.60, "kelly", 0.25),
+        ]
+        for aid, sw, mw, ct, strat, kf in agent_defaults:
+            rw_conn.execute(
+                """INSERT INTO agent_states
+                   (id, statistical_weight, market_weight, confidence_threshold,
+                    staking_strategy, kelly_fraction, learning_rate, update_count,
+                    bankroll, starting_bankroll, total_picks, total_settled,
+                    created_at, last_updated_at, profile_id)
+                   VALUES (?, ?, ?, ?, ?, ?, 0.01, 0, ?, ?, 0, 0, ?, ?, ?)""",
+                (aid, sw, mw, ct, strat, kf, bankroll_start, bankroll_start, now, now, profile_id),
+            )
+        rw_conn.commit()
+    finally:
+        rw_conn.close()
+
+    return {"id": profile_id, "name": name, "type": profile_type, "bankroll_start": bankroll_start, "is_active": False, "created_at": now}
+
+
+@app.get("/api/profiles/{profile_id}")
+def get_profile(profile_id: str):
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Profile not found")
+            return dict(row)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read profile")
+
+
+@app.patch("/api/profiles/{profile_id}")
+async def update_profile(profile_id: str, request: Request):
+    body = await request.json()
+    rw_conn = sqlite3.connect(DB_PATH, timeout=10)
+    rw_conn.row_factory = sqlite3.Row
+    try:
+        existing = rw_conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        name = body.get("name", existing["name"])
+        rw_conn.execute("UPDATE profiles SET name = ? WHERE id = ?", (name, profile_id))
+        rw_conn.commit()
+        return dict(rw_conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone())
+    except HTTPException:
+        raise
+    finally:
+        rw_conn.close()
+
+
+@app.delete("/api/profiles/{profile_id}")
+def delete_profile(profile_id: str):
+    rw_conn = sqlite3.connect(DB_PATH, timeout=10)
+    rw_conn.row_factory = sqlite3.Row
+    try:
+        row = rw_conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        if row["is_active"]:
+            raise HTTPException(status_code=400, detail="Cannot delete the active profile")
+        rw_conn.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+        rw_conn.commit()
+        return {"deleted": True}
+    except HTTPException:
+        raise
+    finally:
+        rw_conn.close()
+
+
+@app.post("/api/profiles/{profile_id}/activate")
+def activate_profile(profile_id: str):
+    rw_conn = sqlite3.connect(DB_PATH, timeout=10)
+    rw_conn.row_factory = sqlite3.Row
+    try:
+        row = rw_conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        rw_conn.execute("UPDATE profiles SET is_active = 0")
+        rw_conn.execute("UPDATE profiles SET is_active = 1 WHERE id = ?", (profile_id,))
+        rw_conn.commit()
+        return dict(rw_conn.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone())
+    except HTTPException:
+        raise
+    finally:
+        rw_conn.close()
+
+
+@app.get("/api/agents")
+def get_agents(profile: Optional[str] = Query(None)):
+    try:
+        with get_db() as conn:
+            pid = _resolve_profile_id(conn, profile)
+            if pid:
+                agents = rows_to_dicts(conn.execute(
+                    "SELECT * FROM agent_states WHERE profile_id = ? ORDER BY id", (pid,)
+                ).fetchall())
+            else:
+                agents = rows_to_dicts(conn.execute("SELECT * FROM agent_states ORDER BY id").fetchall())
             for a in agents:
                 a["agent_id"] = a.pop("id", a.get("agent_id"))
                 aid = a["agent_id"]
-                s = conn.execute("""
-                    SELECT COUNT(*) total,
-                           SUM(outcome='won') won,
-                           SUM(outcome='lost') lost,
-                           SUM(outcome IS NULL) pending,
-                           AVG(CASE WHEN clv IS NOT NULL THEN clv END) clv_avg
-                    FROM agent_picks WHERE agent_id=?
-                """, (aid,)).fetchone()
+                q = "SELECT COUNT(*) total, SUM(outcome='won') won, SUM(outcome='lost') lost, SUM(outcome IS NULL) pending, AVG(CASE WHEN clv IS NOT NULL THEN clv END) clv_avg FROM agent_picks WHERE agent_id=?"
+                p: list = [aid]
+                if pid:
+                    q += " AND profile_id=?"
+                    p.append(pid)
+                s = conn.execute(q, p).fetchone()
                 a["total_picks"] = s["total"] or 0
                 a["won"] = s["won"] or 0
                 a["lost"] = s["lost"] or 0
@@ -124,12 +272,17 @@ def get_agents():
 def get_picks(
     status: Optional[str] = Query(None),
     agent: Optional[str] = Query(None),
+    profile: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
 ):
     try:
         with get_db() as conn:
+            pid = _resolve_profile_id(conn, profile)
             q = "SELECT * FROM agent_picks WHERE 1=1"
             p: list = []
+            if pid:
+                q += " AND profile_id=?"
+                p.append(pid)
             if status:
                 if status == "pending":
                     q += " AND outcome IS NULL"
@@ -147,13 +300,22 @@ def get_picks(
 
 
 @app.get("/api/pnl")
-def get_pnl():
+def get_pnl(profile: Optional[str] = Query(None)):
     result: dict = {"agents": [], "daily_series": []}
     try:
         with get_db() as conn:
-            for a in conn.execute("SELECT DISTINCT agent_id FROM agent_picks ORDER BY agent_id").fetchall():
+            pid = _resolve_profile_id(conn, profile)
+
+            agent_q = "SELECT DISTINCT agent_id FROM agent_picks"
+            agent_p: list = []
+            if pid:
+                agent_q += " WHERE profile_id=?"
+                agent_p.append(pid)
+            agent_q += " ORDER BY agent_id"
+
+            for a in conn.execute(agent_q, agent_p).fetchall():
                 aid = a["agent_id"]
-                s = conn.execute("""
+                q = """
                     SELECT COUNT(*) total,
                            SUM(outcome='won') won,
                            SUM(outcome='lost') lost,
@@ -162,7 +324,12 @@ def get_pnl():
                            AVG(CASE WHEN clv IS NOT NULL THEN clv END) clv_avg,
                            COALESCE(SUM(stake),0) staked
                     FROM agent_picks WHERE agent_id=?
-                """, (aid,)).fetchone()
+                """
+                p: list = [aid]
+                if pid:
+                    q += " AND profile_id=?"
+                    p.append(pid)
+                s = conn.execute(q, p).fetchone()
                 settled = (s["won"] or 0) + (s["lost"] or 0)
                 result["agents"].append({
                     "agent_id": aid,
@@ -175,12 +342,19 @@ def get_pnl():
                     "win_rate": round(s["won"] / settled * 100, 1) if settled else 0,
                     "roi": round(s["net_pnl"] / s["staked"] * 100, 2) if s["staked"] else 0,
                 })
-            cumulative = 0.0
-            for row in conn.execute("""
+
+            daily_q = """
                 SELECT DATE(settled_at) date, SUM(pnl) dpnl
                 FROM agent_picks WHERE settled_at IS NOT NULL AND pnl IS NOT NULL
-                GROUP BY DATE(settled_at) ORDER BY date
-            """).fetchall():
+            """
+            daily_p: list = []
+            if pid:
+                daily_q += " AND profile_id=?"
+                daily_p.append(pid)
+            daily_q += " GROUP BY DATE(settled_at) ORDER BY date"
+
+            cumulative = 0.0
+            for row in conn.execute(daily_q, daily_p).fetchall():
                 cumulative += row["dpnl"]
                 result["daily_series"].append({
                     "date": row["date"],
@@ -383,7 +557,7 @@ async def stream_logs():
 
 
 _SAFE_KEYS = {
-    "PAPER_TRADING", "DB_PATH", "CONFIDENCE_THRESHOLD", "FLAT_STAKE",
+    "DB_PATH", "CONFIDENCE_THRESHOLD", "FLAT_STAKE",
     "MIN_LEAD_HOURS", "MAX_LEAD_HOURS", "LOG_LEVEL",
     "BACKUP_HOUR", "MORNING_HOUR", "SNAPSHOT_HOUR", "ANALYSIS_HOUR",
     "CALENDAR_LOOKAHEAD_DAYS", "CALENDAR_REFRESH_HOUR",
@@ -395,7 +569,6 @@ _SAFE_KEYS = {
 @app.get("/api/config")
 def get_config():
     cfg = {k: os.environ[k] for k in _SAFE_KEYS if k in os.environ}
-    cfg.setdefault("PAPER_TRADING", "true")
     return cfg
 
 
