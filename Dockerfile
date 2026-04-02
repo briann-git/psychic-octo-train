@@ -8,10 +8,13 @@ RUN pip install --no-cache-dir poetry==1.8.2
 # Copy dependency files first (layer caching)
 COPY pyproject.toml poetry.lock* ./
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --only main
+    && poetry install --no-interaction --no-ansi --only main --no-root
 
 # Copy source
 COPY services/betting/ ./betting/
+
+# Copy configuration files (leagues, markets YAML)
+COPY config/ ./config/
 
 # Persistent data directories — mount these as volumes
 RUN mkdir -p /data/db /data/csv_cache /data/logs /data/heartbeat
