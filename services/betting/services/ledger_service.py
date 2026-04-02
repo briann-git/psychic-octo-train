@@ -12,8 +12,8 @@ class LedgerService:
     def __init__(self, repository: ILedgerRepository) -> None:
         self._repository = repository
 
-    def record(self, state: BettingState) -> None:
-        self._repository.record(state)
+    def record(self, state: BettingState, profile_id: str = "default-paper") -> None:
+        self._repository.record(state, profile_id=profile_id)
 
         verdict = state.get("verdict", {})
         if verdict.get("recommendation") == "back":
@@ -28,7 +28,7 @@ class LedgerService:
             if signals:
                 # Retrieve the pick id just written
                 pick = self._repository.get_by_fixture(
-                    state["fixture"]["id"]
+                    state["fixture"]["id"], profile_id=profile_id
                 )
                 if pick and "id" in pick:
                     self._repository.record_pick_signals(pick["id"], signals)

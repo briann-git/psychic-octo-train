@@ -37,6 +37,8 @@ from betting.services.statistical_service import StatisticalService
 from betting.services.agent_repository import AgentRepository
 from betting.services.agent_execution_service import AgentExecutionService
 from betting.services.agent_recalibration_service import AgentRecalibrationService
+from betting.services.profile_repository import ProfileRepository
+from betting.services.profile_service import ProfileService
 from betting.utils import current_season
 
 configure_logging(settings.log_level)
@@ -183,6 +185,11 @@ def run_morning_job() -> None:
     logger.info("Morning job started")
     c = _build_components()
 
+    # Resolve active profile
+    profile_repo = ProfileRepository(db_path=settings.db_path)
+    profile = profile_repo.get_active()
+    profile_id = profile.id if profile else "default-paper"
+
     # 1. Settle pending picks from Odds API
     agent_repo = AgentRepository(db_path=settings.db_path)
     result_service = ResultIngestionService(
@@ -195,6 +202,7 @@ def run_morning_job() -> None:
     settlement = result_service.settle_pending_picks(
         c.active_leagues,
         season=c.season,
+        profile_id=profile_id,
     )
     logger.info(
         "Settlement complete — settled: %d, won: %d, lost: %d, void: %d, still_pending: %d",
@@ -211,6 +219,12 @@ def run_analysis() -> None:
     logger.info("Analysis run started")
 
     c = _build_components()
+
+    # Resolve active profile
+    profile_repo = ProfileRepository(db_path=settings.db_path)
+    profile = profile_repo.get_active()
+    profile_id = profile.id if profile else "default-paper"
+    profile_type = profile.type if profile else "paper"
 
     leagues_today = _get_active_leagues_today(c)
     if not leagues_today:
@@ -239,6 +253,7 @@ def run_analysis() -> None:
     agent_execution_service = AgentExecutionService(
         agent_repo=agent_repo,
         flat_stake=settings.flat_stake,
+        profile_id=profile_id,
     )
 
     # Graph
@@ -250,7 +265,7 @@ def run_analysis() -> None:
             weights=settings.agent_weights,
             confidence_threshold=settings.confidence_threshold,
         ),
-        ledger_node=LedgerNode(ledger_service, paper_trading=settings.paper_trading),
+        ledger_node=LedgerNode(ledger_service, profile_id=profile_id, profile_type=profile_type),
     )
 
     # Run
@@ -304,7 +319,7 @@ def run_analysis() -> None:
 
     # P&L summary
     pnl_service = PnlService(ledger_repo=c.ledger_repo)
-    summary = pnl_service.compute()
+    summary = pnl_service.compute(profile_id=profile_id)
     logger.info(
         "P&L summary — picks: %d (settled: %d, pending: %d) | "
         "won: %d lost: %d void: %d | "
@@ -344,7 +359,7 @@ def run_analysis() -> None:
             )
 
     # Per-agent P&L
-    agents = agent_repo.get_all_agents()
+    agents = agent_repo.get_all_agents(profile_id=profile_id)
     for agent in agents:
         roi = ((agent.bankroll - agent.starting_bankroll) / agent.starting_bankroll) * 100
         logger.info(
@@ -369,8 +384,13 @@ def run_agent_recalibration() -> None:
     agent_repo = AgentRepository(db_path=settings.db_path)
     recalibration_service = AgentRecalibrationService(agent_repo=agent_repo)
 
+    # Resolve active profile
+    profile_repo = ProfileRepository(db_path=settings.db_path)
+    profile = profile_repo.get_active()
+    profile_id = profile.id if profile else "default-paper"
+
     since = datetime.now(tz=timezone.utc) - timedelta(days=7)
-    recalibration_service.recalibrate_all(since=since)
+    recalibration_service.recalibrate_all(since=since, profile_id=profile_id)
     logger.info("Agent recalibration completed")
 
 
@@ -461,9 +481,13 @@ def send_heartbeat() -> None:
 
 
 def main() -> None:
-    # Bootstrap agents on first run
+    # Bootstrap agents on first run for the active profile
     agent_repo = AgentRepository(db_path=settings.db_path)
-    agent_repo.bootstrap_agents()
+    profile_repo = ProfileRepository(db_path=settings.db_path)
+    profile = profile_repo.get_active()
+    profile_id = profile.id if profile else "default-paper"
+    bankroll_start = profile.bankroll_start if profile else 1000.0
+    agent_repo.bootstrap_agents(profile_id=profile_id, bankroll_start=bankroll_start)
 
     scheduler = BlockingScheduler()
 

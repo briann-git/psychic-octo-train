@@ -10,9 +10,9 @@ from betting.graph.nodes.ledger import STALE_SIGNAL_HOURS, LedgerNode
 from betting.services.ledger_service import LedgerService
 
 
-def _make_node(paper_trading: bool = True) -> LedgerNode:
+def _make_node(profile_id: str = "default-paper", profile_type: str = "paper") -> LedgerNode:
     service = MagicMock(spec=LedgerService)
-    return LedgerNode(ledger_service=service, paper_trading=paper_trading)
+    return LedgerNode(ledger_service=service, profile_id=profile_id, profile_type=profile_type)
 
 
 def _base_state(

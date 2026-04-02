@@ -15,17 +15,17 @@ class AgentRecalibrationService:
     def __init__(self, agent_repo: AgentRepository) -> None:
         self._repo = agent_repo
 
-    def recalibrate_all(self, since: datetime) -> None:
+    def recalibrate_all(self, since: datetime, profile_id: str | None = None) -> None:
         """
         Recalibrates all agents from picks settled since the given datetime.
         Called weekly after Sunday settlement run.
         """
-        agents = self._repo.get_all_agents()
+        agents = self._repo.get_all_agents(profile_id=profile_id)
         for agent in agents:
-            self._recalibrate_agent(agent, since)
+            self._recalibrate_agent(agent, since, profile_id=profile_id)
 
-    def _recalibrate_agent(self, agent, since: datetime) -> None:
-        settled = self._repo.get_settled_since(agent.id, since)
+    def _recalibrate_agent(self, agent, since: datetime, profile_id: str | None = None) -> None:
+        settled = self._repo.get_settled_since(agent.id, since, profile_id=profile_id)
 
         if len(settled) < MIN_PICKS_FOR_UPDATE:
             logger.info(
@@ -64,7 +64,7 @@ class AgentRecalibrationService:
         agent.total_settled += len(settled)
         agent.last_updated_at = datetime.now(tz=timezone.utc)
 
-        self._repo.save_agent(agent)
+        self._repo.save_agent(agent, profile_id=profile_id or "default-paper")
 
         logger.info(
             "Agent %s updated — stat=%.3f market=%.3f threshold=%.3f "

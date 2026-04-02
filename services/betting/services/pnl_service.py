@@ -38,10 +38,10 @@ class PnlService:
     def __init__(self, ledger_repo: ILedgerRepository) -> None:
         self._ledger = ledger_repo
 
-    def compute(self) -> PnlSummary:
-        """Computes P&L across all settled picks."""
-        picks = self._ledger.get_all_picks()
-        skips = self._ledger.get_all_skips()
+    def compute(self, profile_id: str | None = None) -> PnlSummary:
+        """Computes P&L across all settled picks, optionally scoped by profile."""
+        picks = self._ledger.get_all_picks(profile_id=profile_id)
+        skips = self._ledger.get_all_skips(profile_id=profile_id)
 
         total_picks = len(picks)
         settled = 0
