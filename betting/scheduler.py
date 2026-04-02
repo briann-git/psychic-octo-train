@@ -32,6 +32,9 @@ from betting.services.market_service import MarketService
 from betting.services.pnl_service import PnlService
 from betting.services.result_ingestion_service import ResultIngestionService
 from betting.services.statistical_service import StatisticalService
+from betting.services.agent_repository import AgentRepository
+from betting.services.agent_execution_service import AgentExecutionService
+from betting.services.agent_recalibration_service import AgentRecalibrationService
 from betting.utils import current_season
 
 configure_logging(settings.log_level)
@@ -179,11 +182,13 @@ def run_morning_job() -> None:
     c = _build_components()
 
     # 1. Settle pending picks from Odds API
+    agent_repo = AgentRepository(db_path=settings.db_path)
     result_service = ResultIngestionService(
         odds_api=c.odds_api,
         ledger_repo=c.ledger_repo,
         market_loader=c.market_loader,
         csv_service=c.csv_service,
+        agent_repo=agent_repo,
     )
     settlement = result_service.settle_pending_picks(
         c.active_leagues,
@@ -227,6 +232,13 @@ def run_analysis() -> None:
     )
     ledger_service = LedgerService(repository=c.ledger_repo)
 
+    # Agent execution
+    agent_repo = AgentRepository(db_path=settings.db_path)
+    agent_execution_service = AgentExecutionService(
+        agent_repo=agent_repo,
+        flat_stake=settings.flat_stake,
+    )
+
     # Graph
     pipeline = build_pipeline(
         ingest_node=IngestNode(c.fixture_service),
@@ -267,7 +279,21 @@ def run_analysis() -> None:
                 "errors": [],
             }
             try:
-                pipeline.invoke(initial_state)
+                final_state = pipeline.invoke(initial_state)
+
+                # Dispatch to bandit agents
+                verdict_dict = final_state.get("verdict")
+                if verdict_dict and verdict_dict.get("recommendation") == "back":
+                    from betting.models.verdict import Verdict as VerdictModel
+                    verdict = VerdictModel.from_dict(verdict_dict)
+                    signals = [
+                        s for s in [
+                            final_state.get("statistical_signal"),
+                            final_state.get("market_signal"),
+                        ]
+                        if s is not None
+                    ]
+                    agent_execution_service.execute(verdict, fixture, odds, signals)
             except Exception as exc:
                 logger.error(
                     "Unhandled error for fixture %s market %s: %s",
@@ -315,7 +341,35 @@ def run_analysis() -> None:
                 bucket["range"], bucket["picks"], bucket["won"], win_rate_str,
             )
 
+    # Per-agent P&L
+    agents = agent_repo.get_all_agents()
+    for agent in agents:
+        roi = ((agent.bankroll - agent.starting_bankroll) / agent.starting_bankroll) * 100
+        logger.info(
+            "Agent %s — bankroll: %.2f (ROI: %+.1f%%) | picks: %d | "
+            "policy: stat=%.2f mkt=%.2f threshold=%.2f updates=%d",
+            agent.id,
+            agent.bankroll,
+            roi,
+            agent.total_picks,
+            agent.policy.statistical_weight,
+            agent.policy.market_weight,
+            agent.policy.confidence_threshold,
+            agent.policy.update_count,
+        )
+
     logger.info("Analysis run completed")
+
+
+def run_agent_recalibration() -> None:
+    """Weekly agent recalibration — runs after Sunday settlement."""
+    logger.info("Agent recalibration started")
+    agent_repo = AgentRepository(db_path=settings.db_path)
+    recalibration_service = AgentRecalibrationService(agent_repo=agent_repo)
+
+    since = datetime.now(tz=timezone.utc) - timedelta(days=7)
+    recalibration_service.recalibrate_all(since=since)
+    logger.info("Agent recalibration completed")
 
 
 def run_calendar_refresh() -> None:
@@ -387,6 +441,10 @@ def _run_snapshot_from_fresh(snapshot_type: str) -> None:
 
 
 def main() -> None:
+    # Bootstrap agents on first run
+    agent_repo = AgentRepository(db_path=settings.db_path)
+    agent_repo.bootstrap_agents()
+
     scheduler = BlockingScheduler()
     scheduler.add_job(run_backup_job, "cron", hour=settings.backup_hour, minute=0)
     scheduler.add_job(run_morning_job, "cron", hour=settings.morning_hour, minute=0)
@@ -400,6 +458,13 @@ def main() -> None:
         run_calendar_refresh,
         "cron", day_of_week="sun",
         hour=settings.calendar_refresh_hour, minute=0,
+    )
+    # Weekly agent recalibration — Sunday before calendar refresh
+    recalibration_hour = (settings.calendar_refresh_hour - 1) % 24
+    scheduler.add_job(
+        run_agent_recalibration,
+        "cron", day_of_week="sun",
+        hour=recalibration_hour, minute=0,
     )
 
     # Bootstrap calendar on first run if empty

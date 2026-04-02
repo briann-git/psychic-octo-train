@@ -31,6 +31,7 @@ class ResultIngestionService:
         market_loader: MarketConfigLoader | None = None,
         csv_service=None,
         settlement_lag_hours: int = 12,
+        agent_repo=None,
     ) -> None:
         self._odds_api = odds_api
         self._ledger = ledger_repo
@@ -38,6 +39,7 @@ class ResultIngestionService:
         self._csv_service = csv_service
         self._settlement_lag_hours = settlement_lag_hours
         self._evaluator = OutcomeEvaluator()
+        self._agent_repo = agent_repo
 
     def settle_pending_picks(
         self,
@@ -55,6 +57,10 @@ class ResultIngestionService:
         pending = self._ledger.get_pending_picks()
         if not pending:
             logger.info("No pending picks to settle")
+            # Still settle agent picks even if no main picks are pending
+            if self._agent_repo is not None:
+                results = self._load_results(leagues, season)
+                self._settle_agent_picks(results, datetime.now(tz=timezone.utc))
             return SettlementSummary()
 
         # Fetch results for all active leagues
@@ -95,6 +101,10 @@ class ResultIngestionService:
                 summary.lost += 1
             else:
                 summary.void += 1
+
+        # Settle agent picks from the same results
+        if self._agent_repo is not None:
+            self._settle_agent_picks(results, now)
 
         return summary
 
@@ -187,3 +197,57 @@ class ResultIngestionService:
             )
             return "void"
         return self._evaluator.evaluate(selection, result)
+
+    def _settle_agent_picks(
+        self,
+        results: dict[tuple[str, str], dict],
+        now: datetime,
+    ) -> None:
+        """
+        Settles agent_picks rows from results dict.
+        Updates agent bankroll on won/void picks.
+        """
+        agents = self._agent_repo.get_all_agents()
+        for agent in agents:
+            unsettled = self._agent_repo.get_unsettled_agent_picks(agent.id)
+            for pick in unsettled:
+                kickoff = datetime.fromisoformat(pick["kickoff"])
+                if kickoff.tzinfo is None:
+                    kickoff = kickoff.replace(tzinfo=timezone.utc)
+                if (now - kickoff).total_seconds() < self._settlement_lag_hours * 3600:
+                    continue
+
+                result_key = (pick["home_team"], pick["away_team"])
+                result = results.get(result_key)
+                if result is None:
+                    continue
+
+                selection = self._market_loader.get_selection(
+                    pick["market"], pick["selection"]
+                )
+                outcome = self._evaluator.evaluate(selection, result) if selection else "void"
+
+                # CLV = implied(opening) - implied(analysis)
+                clv = None
+                opening_odds = pick.get("opening_odds")
+                analysis_odds = pick.get("odds")
+                if opening_odds and analysis_odds and opening_odds > 0 and analysis_odds > 0:
+                    clv = (1.0 / opening_odds) - (1.0 / analysis_odds)
+
+                # P&L
+                if outcome == "won":
+                    pnl = pick["odds"] * pick["stake"] - pick["stake"]
+                elif outcome == "void":
+                    pnl = 0.0
+                else:
+                    pnl = -pick["stake"]
+
+                self._agent_repo.settle_agent_pick(pick["id"], outcome, clv, pnl)
+
+                # Update bankroll
+                if outcome == "won":
+                    agent.bankroll += pick["odds"] * pick["stake"]
+                elif outcome == "void":
+                    agent.bankroll += pick["stake"]
+                agent.total_settled += 1
+                self._agent_repo.save_agent(agent)
