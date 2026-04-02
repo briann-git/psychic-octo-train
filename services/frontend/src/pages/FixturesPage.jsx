@@ -3,11 +3,13 @@ import tokens from '../tokens';
 import Card from '../components/primitives/Card';
 import SectionTitle from '../components/primitives/SectionTitle';
 import useApi from '../hooks/useApi';
+import useTimezone from '../hooks/useTimezone';
 import { fetchFixtures } from '../api/endpoints';
 
 export default function FixturesPage() {
+  const { fmt } = useTimezone();
   const [league, setLeague] = useState('all');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => fmt.isoDate());
   const { data, loading } = useApi(useCallback(() => fetchFixtures({ date }), [date]), { interval: 60000 });
 
   const fixtures = data || [];
@@ -34,13 +36,13 @@ export default function FixturesPage() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }} className="fade-in s2">
-        <div onClick={() => { const d = new Date(date); d.setDate(d.getDate() - 1); setDate(d.toISOString().slice(0,10)); setLeague('all'); }}
+        <div onClick={() => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate() - 1); setDate(fmt.isoDate(d)); setLeague('all'); }}
           style={{ padding: '4px 10px', fontSize: 11, border: `1px solid ${tokens.colors.border2}`, color: tokens.colors.muted, cursor: 'pointer' }}>←</div>
         <input type="date" value={date} onChange={e => { setDate(e.target.value); setLeague('all'); }}
           style={{ background: tokens.colors.surface2, border: `1px solid ${tokens.colors.border2}`, color: tokens.colors.text, padding: '4px 10px', fontSize: 11, fontFamily: tokens.fonts.mono }} />
-        <div onClick={() => { const d = new Date(date); d.setDate(d.getDate() + 1); setDate(d.toISOString().slice(0,10)); setLeague('all'); }}
+        <div onClick={() => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate() + 1); setDate(fmt.isoDate(d)); setLeague('all'); }}
           style={{ padding: '4px 10px', fontSize: 11, border: `1px solid ${tokens.colors.border2}`, color: tokens.colors.muted, cursor: 'pointer' }}>→</div>
-        <div onClick={() => { setDate(new Date().toISOString().slice(0,10)); setLeague('all'); }}
+        <div onClick={() => { setDate(fmt.isoDate()); setLeague('all'); }}
           style={{ padding: '4px 10px', fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', border: `1px solid ${tokens.colors.border2}`, color: tokens.colors.green, cursor: 'pointer' }}>Today</div>
       </div>
 
@@ -71,7 +73,7 @@ export default function FixturesPage() {
                   <td>{f.home}</td>
                   <td>{f.away}</td>
                   <td style={{ color: tokens.colors.muted }}>
-                    {f.kickoff ? new Date(f.kickoff).toLocaleString() : '—'}
+                    {f.kickoff ? fmt.dateTime(f.kickoff) : '—'}
                   </td>
                 </tr>
               ))}

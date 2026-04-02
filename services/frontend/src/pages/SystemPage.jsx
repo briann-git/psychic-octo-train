@@ -3,6 +3,7 @@ import Card from '../components/primitives/Card';
 import CardTitle from '../components/primitives/CardTitle';
 import SectionTitle from '../components/primitives/SectionTitle';
 import useApi from '../hooks/useApi';
+import useTimezone from '../hooks/useTimezone';
 import { fetchConfig } from '../api/endpoints';
 
 const CONFIG_KEYS = [
@@ -11,8 +12,34 @@ const CONFIG_KEYS = [
   'ANALYSIS_HOUR', 'CALENDAR_LOOKAHEAD_DAYS', 'CALENDAR_REFRESH_HOUR',
 ];
 
+const COMMON_TIMEZONES = [
+  'UTC',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Madrid',
+  'Europe/Rome',
+  'Europe/Amsterdam',
+  'Europe/Istanbul',
+  'Africa/Nairobi',
+  'Africa/Cairo',
+  'Africa/Lagos',
+  'Asia/Dubai',
+  'Asia/Kolkata',
+  'Asia/Shanghai',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+  'Pacific/Auckland',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Sao_Paulo',
+];
+
 export default function SystemPage({ profiles }) {
   const { data: config, loading } = useApi(fetchConfig, { interval: 0 });
+  const { tz, setTimezone, fmt } = useTimezone();
   const activeCount = (profiles || []).filter(p => p.is_active).length;
 
   return (
@@ -43,9 +70,26 @@ export default function SystemPage({ profiles }) {
                 <span style={{ color: tokens.colors.muted }}>Active Profiles</span>
                 <span style={{ color: tokens.colors.green }}>{activeCount}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${tokens.colors.border}`, fontSize: 12 }}>
                 <span style={{ color: tokens.colors.muted }}>Log Level</span>
                 <span style={{ color: tokens.colors.text }}>{config.LOG_LEVEL || 'INFO'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', fontSize: 12 }}>
+                <span style={{ color: tokens.colors.muted }}>Display Timezone</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 10, color: tokens.colors.amber }}>{fmt.label()}</span>
+                  <select
+                    value={tz}
+                    onChange={e => setTimezone(e.target.value)}
+                    style={{
+                      background: tokens.colors.surface2, border: `1px solid ${tokens.colors.border2}`,
+                      color: tokens.colors.text, padding: '3px 6px', fontSize: 11,
+                      fontFamily: tokens.fonts.mono, cursor: 'pointer',
+                    }}
+                  >
+                    {COMMON_TIMEZONES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                  </select>
+                </div>
               </div>
             </>
           )}

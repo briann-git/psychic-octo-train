@@ -9,9 +9,11 @@ import Sparkline from '../components/primitives/Sparkline';
 import WeightBar from '../components/primitives/WeightBar';
 import useApi from '../hooks/useApi';
 import { fetchStatus, fetchAgents, fetchPicks, fetchFixtures, fetchJobs } from '../api/endpoints';
+import useTimezone from '../hooks/useTimezone';
 
 export default function OverviewPage({ profileId }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const { fmt } = useTimezone();
+  const today = fmt.isoDate();
   const { data: status }   = useApi(fetchStatus,   { interval: 15000 });
   const { data: agents }   = useApi(useCallback(() => fetchAgents(profileId), [profileId]),   { interval: 30000 });
   const { data: picks }    = useApi(useCallback(() => fetchPicks({ limit: 6, profileId }), [profileId]), { interval: 30000 });
@@ -119,7 +121,7 @@ export default function OverviewPage({ profileId }) {
               {status.last_run && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: `1px solid ${tokens.colors.border}`, fontSize: 12 }}>
                   <span style={{ color: tokens.colors.muted }}>Last pick</span>
-                  <span>{status.last_run.split('T')[0]}</span>
+                  <span>{fmt.date(status.last_run)}</span>
                 </div>
               )}
               {status.db_size && (
@@ -140,7 +142,7 @@ export default function OverviewPage({ profileId }) {
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: `1px solid ${tokens.colors.border}`, fontSize: 12 }}>
               <span style={{ fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: tokens.colors.muted, width: 60, flexShrink: 0 }}>{f.league}</span>
               <span style={{ flex: 1 }}>{f.home} v {f.away}</span>
-              <span style={{ fontSize: 11, color: tokens.colors.muted, flexShrink: 0 }}>{f.kickoff ? f.kickoff.split('T')[1]?.slice(0,5) : ''}</span>
+              <span style={{ fontSize: 11, color: tokens.colors.muted, flexShrink: 0 }}>{f.kickoff ? fmt.time(f.kickoff) : ''}</span>
             </div>
           ))}
           {!allFix.length && <div style={{ color: tokens.colors.muted, fontSize: 12 }}>No fixtures today.</div>}
@@ -159,6 +161,7 @@ export default function OverviewPage({ profileId }) {
               <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${tokens.colors.border}`, fontSize: 12 }}>
                 <span style={{ flex: 1 }}>{j.label}</span>
                 <span style={{ fontSize: 10, color: tokens.colors.muted, flexShrink: 0 }}>{j.schedule}</span>
+                <span style={{ fontSize: 10, color: tokens.colors.muted, flexShrink: 0 }}>{fmt.time(j.next_run)}</span>
                 <span style={{ fontSize: 10, color: tokens.colors.amber, flexShrink: 0, minWidth: 50, textAlign: 'right' }}>{eta}</span>
               </div>
             );

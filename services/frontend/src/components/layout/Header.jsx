@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import tokens from '../../tokens';
 import Pulse from '../primitives/Pulse';
+import useTimezone from '../../hooks/useTimezone';
 
 const TYPE_COLORS = {
   paper:    { fg: tokens.colors.amber, bg: tokens.colors.amberDim, glow: 'paperGlow' },
@@ -12,16 +13,14 @@ export default function Header({ mode, profiles, viewedProfile, selectProfile })
   const [time, setTime] = useState('');
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const { fmt } = useTimezone();
 
   useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      setTime(now.toUTCString().split(' ')[4] + ' UTC');
-    };
+    const tick = () => setTime(fmt.clock());
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [fmt]);
 
   useEffect(() => {
     const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
