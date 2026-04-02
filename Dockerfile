@@ -14,7 +14,7 @@ RUN poetry config virtualenvs.create false \
 COPY services/betting/ ./betting/
 
 # Persistent data directories — mount these as volumes
-RUN mkdir -p /data/db /data/csv_cache
+RUN mkdir -p /data/db /data/csv_cache /data/logs /data/heartbeat
 
 ENV PYTHONUNBUFFERED=1
 

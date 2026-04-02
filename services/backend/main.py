@@ -1,8 +1,11 @@
-import os
+import asyncio
 import json
+import os
+import re
 import sqlite3
 import mimetypes
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +15,11 @@ from fastapi.responses import StreamingResponse, FileResponse
 # ─── Config ──────────────────────────────────────────────────────────────────
 
 DB_PATH = os.environ.get("DB_PATH", "/data/db/ledger.db")
+LOG_DIR = os.environ.get("LOG_DIR", "/data/logs")
+LOG_FILE = os.path.join(LOG_DIR, "scheduler.log")
+HEARTBEAT_DIR = os.environ.get("HEARTBEAT_DIR", "/data/heartbeat")
+HEARTBEAT_FILE = os.path.join(HEARTBEAT_DIR, "scheduler.json")
+HEARTBEAT_STALE_SECONDS = 15 * 60  # 15 minutes — heartbeat is every 10 min
 STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Pipeline Ops Dashboard", version="1.0.0")
@@ -31,14 +39,39 @@ def get_db():
 def rows_to_dicts(rows):
     return [dict(r) for r in rows]
 
+# ─── Heartbeat ───────────────────────────────────────────────────────────────
+
+def _read_heartbeat() -> dict | None:
+    """Read the scheduler heartbeat file. Returns None if missing or unreadable."""
+    try:
+        with open(HEARTBEAT_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _is_scheduler_running() -> bool:
+    """True if heartbeat was received within the staleness window."""
+    hb = _read_heartbeat()
+    if not hb or "timestamp" not in hb:
+        return False
+    try:
+        ts = datetime.fromisoformat(hb["timestamp"])
+        age = (datetime.now(tz=timezone.utc) - ts).total_seconds()
+        return age < HEARTBEAT_STALE_SECONDS
+    except (ValueError, TypeError):
+        return False
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @app.get("/api/status")
 def get_status():
+    heartbeat = _read_heartbeat()
+    running = _is_scheduler_running()
     result = {
-        "scheduler_running": None,
+        "scheduler_running": running,
         "last_run": None,
-        "uptime": None,
+        "uptime": heartbeat.get("timestamp") if heartbeat else None,
         "db_size": None,
     }
 
@@ -175,18 +208,160 @@ def get_fixtures(
         return []
 
 
+# ─── Log file helpers ────────────────────────────────────────────────────────
+
+_LOG_RE = re.compile(
+    r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\s+"
+    r"\[(\w+)\]\s+(\S+)\s+[—\-–]\s+(.*)"
+)
+
+
+def _parse_log_line(line: str) -> dict | None:
+    m = _LOG_RE.match(line)
+    if m:
+        return {"time": m.group(1), "level": m.group(2), "source": m.group(3), "message": m.group(4)}
+    return None
+
+
+def _tail_log_file(path: str, limit: int) -> list[str]:
+    """
+    Read the last *limit* complete lines from *path*.
+
+    Race-condition safe: opens read-only and tolerates the writer appending
+    or RotatingFileHandler rotating underneath us.  If the file is truncated
+    mid-read we simply return what we got.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return []
+    try:
+        try:
+            size = os.fstat(fd).st_size
+        except OSError:
+            return []
+        if size == 0:
+            return []
+
+        # Read a generous chunk from the end.  4 KB per line is very
+        # conservative; real lines are ~200 bytes.
+        chunk_size = min(size, limit * 4096)
+        try:
+            os.lseek(fd, max(size - chunk_size, 0), os.SEEK_SET)
+            raw = os.read(fd, chunk_size)
+        except OSError:
+            return []
+
+        text = raw.decode("utf-8", errors="replace")
+        lines = text.split("\n")
+
+        # The first element may be a partial line if we seeked mid-line;
+        # drop it unless we read from the start of the file.
+        if size > chunk_size:
+            lines = lines[1:]
+
+        # Strip empty trailing element from the final newline
+        if lines and not lines[-1]:
+            lines.pop()
+
+        return lines[-limit:]
+    finally:
+        os.close(fd)
+
+
 @app.get("/api/logs")
 def get_logs(
     level: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
 ):
-    return []
+    raw_lines = _tail_log_file(LOG_FILE, limit * 2)
+    entries: list[dict] = []
+    for line in raw_lines:
+        entry = _parse_log_line(line)
+        if entry is None:
+            continue
+        if level and entry["level"] != level.upper():
+            continue
+        entries.append(entry)
+    return entries[-limit:]
 
 
 @app.get("/api/logs/stream")
 async def stream_logs():
+    """
+    SSE endpoint that tails the log file.
+
+    Opens the file read-only and polls for new data every second.
+    If RotatingFileHandler rotates the file (inode changes or file
+    shrinks) we re-open transparently.
+    """
     async def generator():
-        yield f"data: {json.dumps({'error': 'log streaming not available'})}\n\n"
+        fd: int | None = None
+        inode: int = 0
+        pos: int = 0
+
+        def _open() -> tuple[int, int, int]:
+            """Open log file, return (fd, inode, size)."""
+            f = os.open(LOG_FILE, os.O_RDONLY)
+            stat = os.fstat(f)
+            return f, stat.st_ino, stat.st_size
+
+        try:
+            while True:
+                # (re-)open if necessary
+                if fd is None:
+                    try:
+                        fd, inode, size = _open()
+                        pos = size  # skip existing content, only stream new
+                    except OSError:
+                        await asyncio.sleep(2)
+                        continue
+
+                # Check for rotation: new inode or file got smaller
+                try:
+                    cur_stat = os.stat(LOG_FILE)
+                except OSError:
+                    # File temporarily missing during rotation
+                    os.close(fd)
+                    fd = None
+                    await asyncio.sleep(1)
+                    continue
+
+                if cur_stat.st_ino != inode or cur_stat.st_size < pos:
+                    os.close(fd)
+                    try:
+                        fd, inode, size = _open()
+                        pos = 0  # rotated — read from start
+                    except OSError:
+                        fd = None
+                        await asyncio.sleep(1)
+                        continue
+
+                # Read new bytes
+                try:
+                    os.lseek(fd, pos, os.SEEK_SET)
+                    raw = os.read(fd, 65536)
+                except OSError:
+                    os.close(fd)
+                    fd = None
+                    await asyncio.sleep(1)
+                    continue
+
+                if raw:
+                    text = raw.decode("utf-8", errors="replace")
+                    pos += len(raw)
+                    for line in text.split("\n"):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        entry = _parse_log_line(line)
+                        if entry:
+                            yield f"data: {json.dumps(entry)}\n\n"
+
+                await asyncio.sleep(1)
+        finally:
+            if fd is not None:
+                os.close(fd)
 
     return StreamingResponse(
         generator(),
