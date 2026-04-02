@@ -121,19 +121,35 @@ async def create_profile(request: Request):
     body = await request.json()
     name = body.get("name")
     profile_type = body.get("type", "paper")
-    bankroll_start = body.get("bankroll_start", 1000.0)
+    agents_cfg = body.get("agents", [])
 
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
     if profile_type not in ("paper", "live", "backtest"):
         raise HTTPException(status_code=400, detail="type must be paper, live, or backtest")
+    if not agents_cfg or len(agents_cfg) > 5:
+        raise HTTPException(status_code=400, detail="agents must be an array of 1-5 items")
+
+    # Validate each agent config
+    AGENT_IDS = list("ABCDE")
+    for i, a in enumerate(agents_cfg):
+        if not isinstance(a.get("bankroll"), (int, float)) or a["bankroll"] <= 0:
+            raise HTTPException(status_code=400, detail=f"Agent {AGENT_IDS[i]}: bankroll must be a positive number")
+        if not 0.50 <= a.get("confidence_threshold", 0) <= 0.90:
+            raise HTTPException(status_code=400, detail=f"Agent {AGENT_IDS[i]}: confidence_threshold must be 0.50-0.90")
+        if a.get("staking_strategy") not in ("flat", "kelly"):
+            raise HTTPException(status_code=400, detail=f"Agent {AGENT_IDS[i]}: staking_strategy must be flat or kelly")
+        sw = a.get("statistical_weight", 0.7)
+        mw = a.get("market_weight", 0.3)
+        if not (0 < sw <= 1 and 0 < mw <= 1):
+            raise HTTPException(status_code=400, detail=f"Agent {AGENT_IDS[i]}: weights must be between 0 and 1")
 
     import uuid as _uuid
     from datetime import datetime as _dt, timezone as _tz
     profile_id = str(_uuid.uuid4())
     now = _dt.now(tz=_tz.utc).isoformat()
+    bankroll_start = sum(a["bankroll"] for a in agents_cfg)
 
-    # Write profile — uses a separate RW connection
     rw_conn = sqlite3.connect(DB_PATH, timeout=10)
     rw_conn.row_factory = sqlite3.Row
     try:
@@ -141,15 +157,7 @@ async def create_profile(request: Request):
             "INSERT INTO profiles (id, name, type, bankroll_start, is_active, created_at) VALUES (?, ?, ?, ?, 0, ?)",
             (profile_id, name, profile_type, bankroll_start, now),
         )
-        # Bootstrap 4 agents for this profile
-        from betting.models.agent import BanditPolicy
-        agent_defaults = [
-            ("A", 0.80, 0.20, 0.62, "flat", 0.25),
-            ("B", 0.40, 0.60, 0.65, "flat", 0.25),
-            ("C", 0.60, 0.40, 0.70, "flat", 0.25),
-            ("D", 0.50, 0.50, 0.60, "kelly", 0.25),
-        ]
-        for aid, sw, mw, ct, strat, kf in agent_defaults:
+        for i, a in enumerate(agents_cfg):
             rw_conn.execute(
                 """INSERT INTO agent_states
                    (id, statistical_weight, market_weight, confidence_threshold,
@@ -157,7 +165,17 @@ async def create_profile(request: Request):
                     bankroll, starting_bankroll, total_picks, total_settled,
                     created_at, last_updated_at, profile_id)
                    VALUES (?, ?, ?, ?, ?, ?, 0.01, 0, ?, ?, 0, 0, ?, ?, ?)""",
-                (aid, sw, mw, ct, strat, kf, bankroll_start, bankroll_start, now, now, profile_id),
+                (
+                    AGENT_IDS[i],
+                    a.get("statistical_weight", 0.7),
+                    a.get("market_weight", 0.3),
+                    a["confidence_threshold"],
+                    a["staking_strategy"],
+                    a.get("kelly_fraction", 0.25),
+                    a["bankroll"],
+                    a["bankroll"],
+                    now, now, profile_id,
+                ),
             )
         rw_conn.commit()
     finally:

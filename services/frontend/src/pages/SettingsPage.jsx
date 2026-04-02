@@ -5,6 +5,7 @@ import CardTitle from '../components/primitives/CardTitle';
 import SectionTitle from '../components/primitives/SectionTitle';
 import useApi from '../hooks/useApi';
 import { fetchConfig } from '../api/endpoints';
+import ProfileWizard from '../components/wizard/ProfileWizard';
 
 const TYPE_COLORS = {
   paper:    { fg: tokens.colors.amber, bg: tokens.colors.amberDim },
@@ -14,19 +15,7 @@ const TYPE_COLORS = {
 
 export default function SettingsPage({ mode, profileId, profiles, activeProfile, switchProfile, createProfile, removeProfile, reloadProfiles }) {
   const { data: config, loading } = useApi(fetchConfig, { interval: 0 });
-  const [newName, setNewName] = useState('');
-  const [newType, setNewType] = useState('paper');
-  const [newBankroll, setNewBankroll] = useState('1000');
-  const [creating, setCreating] = useState(false);
-
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    setCreating(true);
-    await createProfile(newName.trim(), newType, parseFloat(newBankroll) || 1000);
-    setNewName('');
-    setNewBankroll('1000');
-    setCreating(false);
-  };
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const CONFIG_KEYS = [
     'CONFIDENCE_THRESHOLD', 'FLAT_STAKE', 'MIN_LEAD_HOURS', 'MAX_LEAD_HOURS',
@@ -80,57 +69,22 @@ export default function SettingsPage({ mode, profileId, profiles, activeProfile,
 
           {/* Create new profile */}
           <div style={{ borderTop: `1px solid ${tokens.colors.border}`, paddingTop: 12 }}>
-            <div style={{ fontSize: 11, letterSpacing: '.15em', textTransform: 'uppercase', color: tokens.colors.muted, marginBottom: 8 }}>New Profile</div>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-              <input
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                placeholder="Name"
-                style={{
-                  flex: 1, padding: '6px 8px', fontSize: 12,
-                  background: tokens.colors.surface2, border: `1px solid ${tokens.colors.border}`,
-                  color: tokens.colors.text, outline: 'none',
-                }}
-              />
-              <select
-                value={newType}
-                onChange={e => setNewType(e.target.value)}
-                style={{
-                  padding: '6px 8px', fontSize: 12,
-                  background: tokens.colors.surface2, border: `1px solid ${tokens.colors.border}`,
-                  color: tokens.colors.text, outline: 'none',
-                }}
-              >
-                <option value="paper">Paper</option>
-                <option value="live">Live</option>
-                <option value="backtest">Backtest</option>
-              </select>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input
-                value={newBankroll}
-                onChange={e => setNewBankroll(e.target.value)}
-                placeholder="Bankroll"
-                type="number"
-                style={{
-                  flex: 1, padding: '6px 8px', fontSize: 12,
-                  background: tokens.colors.surface2, border: `1px solid ${tokens.colors.border}`,
-                  color: tokens.colors.text, outline: 'none',
-                }}
-              />
-              <div
-                onClick={creating ? undefined : handleCreate}
-                style={{
-                  padding: '6px 14px', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase',
-                  cursor: creating || !newName.trim() ? 'not-allowed' : 'pointer',
-                  background: tokens.colors.greenDim, border: `1px solid ${tokens.colors.green}`,
-                  color: tokens.colors.green, opacity: creating || !newName.trim() ? 0.5 : 1,
-                }}
-              >
-                {creating ? 'Creating…' : 'Create'}
-              </div>
-            </div>
+            <div
+              onClick={() => setWizardOpen(true)}
+              style={{
+                padding: '8px 0', textAlign: 'center', fontSize: 11,
+                letterSpacing: '.15em', textTransform: 'uppercase',
+                cursor: 'pointer', border: `1px solid ${tokens.colors.border}`,
+                color: tokens.colors.green, background: tokens.colors.greenDim,
+              }}
+            >+ New Profile</div>
           </div>
+
+          <ProfileWizard
+            open={wizardOpen}
+            onClose={() => setWizardOpen(false)}
+            onCreate={createProfile}
+          />
 
           {mode === 'live' && (
             <div style={{ marginTop: 12, padding: 12, border: `1px solid ${tokens.colors.red}`, background: tokens.colors.redDim, fontSize: 12, color: tokens.colors.red, lineHeight: 1.7 }}>

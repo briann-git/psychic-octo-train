@@ -36,8 +36,8 @@ export default function useProfiles() {
     }
   }, [activeProfile, load]);
 
-  const createProfile = useCallback(async ({ name, type, bankroll_start }) => {
-    const created = await apiCreateProfile({ name, type, bankroll_start });
+  const createProfile = useCallback(async ({ name, type, agents }) => {
+    const created = await apiCreateProfile({ name, type, agents });
     await load();
     return created;
   }, [load]);

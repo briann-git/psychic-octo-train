@@ -24,7 +24,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./data/db:/data/db:ro
+      - ./data/db:/data/db
       - ./data/logs:/data/logs:ro
       - ./data/heartbeat:/data/heartbeat:ro
     env_file:
