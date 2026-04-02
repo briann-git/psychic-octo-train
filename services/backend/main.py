@@ -286,6 +286,67 @@ def get_agents(profile: Optional[str] = Query(None)):
         return []
 
 
+@app.post("/api/agents/{agent_id}/decommission")
+def decommission_agent(agent_id: str, profile: Optional[str] = Query(None)):
+    rw_conn = sqlite3.connect(DB_PATH, timeout=10)
+    rw_conn.row_factory = sqlite3.Row
+    try:
+        pid = profile
+        if not pid:
+            row = rw_conn.execute("SELECT id FROM profiles WHERE is_active = 1 LIMIT 1").fetchone()
+            pid = row["id"] if row else None
+        if not pid:
+            raise HTTPException(status_code=400, detail="No profile specified or active")
+        agent = rw_conn.execute(
+            "SELECT * FROM agent_states WHERE id = ? AND profile_id = ?", (agent_id, pid)
+        ).fetchone()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if agent["decommissioned_at"]:
+            raise HTTPException(status_code=400, detail="Agent already decommissioned")
+        now = datetime.now(tz=timezone.utc).isoformat()
+        rw_conn.execute(
+            "UPDATE agent_states SET decommissioned_at = ? WHERE id = ? AND profile_id = ?",
+            (now, agent_id, pid),
+        )
+        rw_conn.commit()
+        return {"agent_id": agent_id, "profile_id": pid, "decommissioned_at": now}
+    except HTTPException:
+        raise
+    finally:
+        rw_conn.close()
+
+
+@app.post("/api/agents/{agent_id}/recommission")
+def recommission_agent(agent_id: str, profile: Optional[str] = Query(None)):
+    rw_conn = sqlite3.connect(DB_PATH, timeout=10)
+    rw_conn.row_factory = sqlite3.Row
+    try:
+        pid = profile
+        if not pid:
+            row = rw_conn.execute("SELECT id FROM profiles WHERE is_active = 1 LIMIT 1").fetchone()
+            pid = row["id"] if row else None
+        if not pid:
+            raise HTTPException(status_code=400, detail="No profile specified or active")
+        agent = rw_conn.execute(
+            "SELECT * FROM agent_states WHERE id = ? AND profile_id = ?", (agent_id, pid)
+        ).fetchone()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if not agent["decommissioned_at"]:
+            raise HTTPException(status_code=400, detail="Agent is not decommissioned")
+        rw_conn.execute(
+            "UPDATE agent_states SET decommissioned_at = NULL WHERE id = ? AND profile_id = ?",
+            (agent_id, pid),
+        )
+        rw_conn.commit()
+        return {"agent_id": agent_id, "profile_id": pid, "decommissioned_at": None}
+    except HTTPException:
+        raise
+    finally:
+        rw_conn.close()
+
+
 @app.get("/api/picks")
 def get_picks(
     status: Optional[str] = Query(None),
@@ -600,6 +661,58 @@ async def update_config(request: Request):
         os.environ[key] = str(value)
         updated[key] = str(value)
     return updated
+
+
+# ─── Scheduled Jobs ──────────────────────────────────────────────────────────
+
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(os.environ.get(key, default))
+    except (ValueError, TypeError):
+        return default
+
+
+@app.get("/api/jobs")
+def get_scheduled_jobs():
+    """Return the list of scheduler jobs with their next run time."""
+    from datetime import timedelta
+    now = datetime.now(tz=timezone.utc)
+    today = now.date()
+
+    morning_hour = _env_int("MORNING_HOUR", 8)
+    snapshot_hour = _env_int("SNAPSHOT_HOUR", 12)
+    analysis_hour = _env_int("ANALYSIS_HOUR", 14)
+    backup_hour = _env_int("BACKUP_HOUR", 3)
+    calendar_refresh_hour = _env_int("CALENDAR_REFRESH_HOUR", 20)
+    recalibration_hour = (calendar_refresh_hour - 1) % 24
+
+    def _next_daily(hour: int) -> str:
+        """Next occurrence of a daily cron at the given hour (UTC)."""
+        candidate = datetime(today.year, today.month, today.day, hour, 0, 0, tzinfo=timezone.utc)
+        if candidate <= now:
+            candidate += timedelta(days=1)
+        return candidate.isoformat()
+
+    def _next_weekly_sun(hour: int) -> str:
+        """Next occurrence of a weekly Sunday cron at the given hour (UTC)."""
+        days_ahead = (6 - today.weekday()) % 7  # 6 = Sunday
+        if days_ahead == 0:
+            candidate = datetime(today.year, today.month, today.day, hour, 0, 0, tzinfo=timezone.utc)
+            if candidate <= now:
+                candidate += timedelta(weeks=1)
+        else:
+            next_sun = today + timedelta(days=days_ahead)
+            candidate = datetime(next_sun.year, next_sun.month, next_sun.day, hour, 0, 0, tzinfo=timezone.utc)
+        return candidate.isoformat()
+
+    return [
+        {"id": "backup",            "label": "Backup",              "schedule": f"Daily {backup_hour:02d}:00 UTC",    "next_run": _next_daily(backup_hour)},
+        {"id": "morning",           "label": "Morning Settlement",  "schedule": f"Daily {morning_hour:02d}:00 UTC",   "next_run": _next_daily(morning_hour)},
+        {"id": "snapshot",          "label": "Odds Snapshot",       "schedule": f"Daily {snapshot_hour:02d}:00 UTC",  "next_run": _next_daily(snapshot_hour)},
+        {"id": "analysis",          "label": "Analysis Run",        "schedule": f"Daily {analysis_hour:02d}:00 UTC",  "next_run": _next_daily(analysis_hour)},
+        {"id": "recalibration",     "label": "Agent Recalibration", "schedule": f"Sun {recalibration_hour:02d}:00 UTC",  "next_run": _next_weekly_sun(recalibration_hour)},
+        {"id": "calendar_refresh",  "label": "Calendar Refresh",    "schedule": f"Sun {calendar_refresh_hour:02d}:00 UTC", "next_run": _next_weekly_sun(calendar_refresh_hour)},
+    ]
 
 
 # ─── SPA static serving ──────────────────────────────────────────────────────

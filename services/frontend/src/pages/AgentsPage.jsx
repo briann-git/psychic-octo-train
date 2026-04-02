@@ -4,13 +4,27 @@ import SectionTitle from '../components/primitives/SectionTitle';
 import Badge from '../components/primitives/Badge';
 import WeightBar from '../components/primitives/WeightBar';
 import useApi from '../hooks/useApi';
-import { fetchAgents } from '../api/endpoints';
+import { fetchAgents, decommissionAgent, recommissionAgent } from '../api/endpoints';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
 export default function AgentsPage({ profileId }) {
-  const { data, loading } = useApi(useCallback(() => fetchAgents(profileId), [profileId]), { interval: 30000 });
+  const { data, loading, refetch } = useApi(useCallback(() => fetchAgents(profileId), [profileId]), { interval: 30000 });
   const agents = data || [];
+  const [busy, setBusy] = useState(null);
+
+  const handleToggle = async (agentId, isDecommissioned) => {
+    setBusy(agentId);
+    try {
+      if (isDecommissioned) {
+        await recommissionAgent(agentId, profileId);
+      } else {
+        await decommissionAgent(agentId, profileId);
+      }
+      refetch();
+    } catch (e) { console.error(e); }
+    setBusy(null);
+  };
 
   return (
     <div>
@@ -21,8 +35,10 @@ export default function AgentsPage({ profileId }) {
           const pnl = (a.bankroll || 0) - (a.starting_bankroll || 1000);
           const pct = ((a.bankroll || 0) / (a.starting_bankroll || 1000)) * 100;
           const up  = pnl >= 0;
+          const decomm = !!a.decommissioned_at;
+          const dimStyle = decomm ? { opacity: 0.45, pointerEvents: 'none' } : {};
           return (
-            <Card key={a.agent_id}>
+            <Card key={a.agent_id} style={decomm ? { borderColor: tokens.colors.border, opacity: 0.7 } : {}}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
                 <div>
                   <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Agent {a.agent_id}</div>
@@ -31,47 +47,71 @@ export default function AgentsPage({ profileId }) {
                     {a.staking_strategy === 'kelly' ? ` · kelly ${a.kelly_fraction}` : ''}
                   </div>
                 </div>
-                <Badge type={up ? 'won' : 'lost'}>{up ? '+' : ''}£{pnl.toFixed(2)}</Badge>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 16 }}>
-                {[
-                  { label: 'Bankroll',   value: `£${(+(a.bankroll || 0)).toFixed(2)}`,    color: up ? tokens.colors.green : tokens.colors.red },
-                  { label: 'Total Picks', value: a.total_picks || 0 },
-                  { label: 'Win Rate',   value: `${a.win_rate || 0}%` },
-                  { label: 'Threshold',  value: (+(a.confidence_threshold || 0)).toFixed(3) },
-                  { label: 'CLV Avg',    value: `${(a.clv_avg || 0) >= 0 ? '+' : ''}${a.clv_avg || 0}%`, color: (a.clv_avg || 0) >= 0 ? tokens.colors.blue : tokens.colors.red },
-                  { label: 'Updates',    value: a.update_count || 0 },
-                ].map(({ label, value, color }) => (
-                  <div key={label} style={{ padding: '10px 12px', border: `1px solid ${tokens.colors.border}`, background: tokens.colors.surface2 }}>
-                    <div style={{ fontSize: 9, color: tokens.colors.muted, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
-                    <div style={{ fontSize: 15, fontWeight: 500, color: color || tokens.colors.text }}>{value}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: tokens.colors.muted, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: 8 }}>Signal Weights</div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                  <div style={{ flex: a.statistical_weight || 0.5, height: 24, background: tokens.colors.greenDim, border: `1px solid ${tokens.colors.green}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: tokens.colors.green }}>
-                    STAT {((a.statistical_weight || 0.5) * 100).toFixed(0)}%
-                  </div>
-                  <div style={{ flex: a.market_weight || 0.5, height: 24, background: tokens.colors.blueDim, border: `1px solid ${tokens.colors.blue}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: tokens.colors.blue }}>
-                    MKT {((a.market_weight || 0.5) * 100).toFixed(0)}%
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {decomm && (
+                    <span style={{ fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', padding: '3px 8px', background: 'rgba(255,100,100,.08)', border: `1px solid ${tokens.colors.red}`, color: tokens.colors.red }}>
+                      Decommissioned
+                    </span>
+                  )}
+                  <Badge type={up ? 'won' : 'lost'}>{up ? '+' : ''}£{pnl.toFixed(2)}</Badge>
                 </div>
               </div>
 
-              <WeightBar stat={a.statistical_weight || 0.5} mkt={a.market_weight || 0.5} />
+              <div style={dimStyle}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 16 }}>
+                  {[
+                    { label: 'Bankroll',   value: `£${(+(a.bankroll || 0)).toFixed(2)}`,    color: up ? tokens.colors.green : tokens.colors.red },
+                    { label: 'Total Picks', value: a.total_picks || 0 },
+                    { label: 'Win Rate',   value: `${a.win_rate || 0}%` },
+                    { label: 'Threshold',  value: (+(a.confidence_threshold || 0)).toFixed(3) },
+                    { label: 'CLV Avg',    value: `${(a.clv_avg || 0) >= 0 ? '+' : ''}${a.clv_avg || 0}%`, color: (a.clv_avg || 0) >= 0 ? tokens.colors.blue : tokens.colors.red },
+                    { label: 'Updates',    value: a.update_count || 0 },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} style={{ padding: '10px 12px', border: `1px solid ${tokens.colors.border}`, background: tokens.colors.surface2 }}>
+                      <div style={{ fontSize: 9, color: tokens.colors.muted, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 500, color: color || tokens.colors.text }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
 
-              <div style={{ fontSize: 10, color: tokens.colors.muted, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 6, marginTop: 12 }}>Bankroll vs Starting</div>
-              <div style={{ height: 5, background: tokens.colors.border, marginBottom: 4 }}>
-                <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: up ? tokens.colors.green : tokens.colors.red, transition: 'width .5s' }} />
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: tokens.colors.muted, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: 8 }}>Signal Weights</div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                    <div style={{ flex: a.statistical_weight || 0.5, height: 24, background: tokens.colors.greenDim, border: `1px solid ${tokens.colors.green}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: tokens.colors.green }}>
+                      STAT {((a.statistical_weight || 0.5) * 100).toFixed(0)}%
+                    </div>
+                    <div style={{ flex: a.market_weight || 0.5, height: 24, background: tokens.colors.blueDim, border: `1px solid ${tokens.colors.blue}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: tokens.colors.blue }}>
+                      MKT {((a.market_weight || 0.5) * 100).toFixed(0)}%
+                    </div>
+                  </div>
+                </div>
+
+                <WeightBar stat={a.statistical_weight || 0.5} mkt={a.market_weight || 0.5} />
+
+                <div style={{ fontSize: 10, color: tokens.colors.muted, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 6, marginTop: 12 }}>Bankroll vs Starting</div>
+                <div style={{ height: 5, background: tokens.colors.border, marginBottom: 4 }}>
+                  <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: up ? tokens.colors.green : tokens.colors.red, transition: 'width .5s' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: tokens.colors.muted }}>
+                  <span>Start £{(+(a.starting_bankroll || 1000)).toFixed(2)}</span>
+                  <span style={{ color: up ? tokens.colors.green : tokens.colors.red }}>Now £{(+(a.bankroll || 0)).toFixed(2)}</span>
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: tokens.colors.muted }}>
-                <span>Start £{(+(a.starting_bankroll || 1000)).toFixed(2)}</span>
-                <span style={{ color: up ? tokens.colors.green : tokens.colors.red }}>Now £{(+(a.bankroll || 0)).toFixed(2)}</span>
-              </div>
+
+              <button
+                onClick={() => handleToggle(a.agent_id, decomm)}
+                disabled={busy === a.agent_id}
+                style={{
+                  marginTop: 14, width: '100%', padding: '7px 0', cursor: 'pointer',
+                  fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase',
+                  background: 'transparent',
+                  border: `1px solid ${decomm ? tokens.colors.green : tokens.colors.red}`,
+                  color: decomm ? tokens.colors.green : tokens.colors.red,
+                  opacity: busy === a.agent_id ? 0.5 : 1,
+                }}
+              >
+                {busy === a.agent_id ? '…' : decomm ? 'Recommission' : 'Decommission'}
+              </button>
             </Card>
           );
         })}

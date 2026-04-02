@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional
 
 
 @dataclass
@@ -42,3 +43,8 @@ class Agent:
     last_updated_at: datetime
     total_picks: int = 0
     total_settled: int = 0
+    decommissioned_at: Optional[datetime] = field(default=None)
+
+    @property
+    def is_decommissioned(self) -> bool:
+        return self.decommissioned_at is not None

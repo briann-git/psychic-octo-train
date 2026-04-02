@@ -102,6 +102,10 @@ class AgentRepository:
             )
             self._rebuild_agent_states(conn)
 
+        # Add decommissioned_at column if missing
+        if "decommissioned_at" not in state_cols:
+            conn.execute("ALTER TABLE agent_states ADD COLUMN decommissioned_at TEXT")
+
         # Create profile indexes after columns are guaranteed to exist
         conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_states_profile ON agent_states (profile_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_picks_profile ON agent_picks (profile_id)")
@@ -194,8 +198,8 @@ class AgentRepository:
                 (id, statistical_weight, market_weight, confidence_threshold,
                  staking_strategy, kelly_fraction, learning_rate, update_count,
                  bankroll, starting_bankroll, total_picks, total_settled,
-                 created_at, last_updated_at, profile_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 created_at, last_updated_at, profile_id, decommissioned_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     agent.id,
@@ -213,8 +217,28 @@ class AgentRepository:
                     agent.created_at.isoformat(),
                     agent.last_updated_at.isoformat(),
                     profile_id,
+                    agent.decommissioned_at.isoformat() if agent.decommissioned_at else None,
                 ),
             )
+
+    def decommission_agent(self, agent_id: str, profile_id: str) -> bool:
+        """Soft-decommission an agent. Returns True if agent was found and updated."""
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE agent_states SET decommissioned_at = ? WHERE id = ? AND profile_id = ? AND decommissioned_at IS NULL",
+                (now, agent_id, profile_id),
+            )
+            return cur.rowcount > 0
+
+    def recommission_agent(self, agent_id: str, profile_id: str) -> bool:
+        """Re-activate a decommissioned agent. Returns True if agent was found and updated."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE agent_states SET decommissioned_at = NULL WHERE id = ? AND profile_id = ? AND decommissioned_at IS NOT NULL",
+                (agent_id, profile_id),
+            )
+            return cur.rowcount > 0
 
     def record_agent_pick(self, agent_id: str, pick: dict, profile_id: str = "default-paper") -> None:
         """Writes a row to agent_picks."""
@@ -393,6 +417,8 @@ class AgentRepository:
     def _row_to_agent(row: dict) -> Agent:
         created = datetime.fromisoformat(row["created_at"])
         updated = datetime.fromisoformat(row["last_updated_at"])
+        decomm_raw = row.get("decommissioned_at")
+        decomm = datetime.fromisoformat(decomm_raw) if decomm_raw else None
         return Agent(
             id=row["id"],
             policy=BanditPolicy(
@@ -410,4 +436,5 @@ class AgentRepository:
             total_settled=row["total_settled"],
             created_at=created,
             last_updated_at=updated,
+            decommissioned_at=decomm,
         )

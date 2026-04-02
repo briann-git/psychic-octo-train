@@ -35,6 +35,8 @@ class AgentExecutionService:
         """
         agents = self._repo.get_all_agents(profile_id=self._profile_id)
         for agent in agents:
+            if agent.is_decommissioned:
+                continue
             self._execute_for_agent(agent, verdict, fixture, odds, signals)
 
     def _execute_for_agent(

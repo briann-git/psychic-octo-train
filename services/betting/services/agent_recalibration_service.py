@@ -22,6 +22,9 @@ class AgentRecalibrationService:
         """
         agents = self._repo.get_all_agents(profile_id=profile_id)
         for agent in agents:
+            if agent.is_decommissioned:
+                logger.info("Agent %s — decommissioned, skipping recalibration", agent.id)
+                continue
             self._recalibrate_agent(agent, since, profile_id=profile_id)
 
     def _recalibrate_agent(self, agent, since: datetime, profile_id: str | None = None) -> None:

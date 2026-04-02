@@ -3,6 +3,7 @@ import { get, post, patch, del } from './client';
 export const fetchStatus   = () => get('/status');
 export const fetchConfig   = () => get('/config');
 export const updateConfig  = (body) => patch('/config', body);
+export const fetchJobs     = () => get('/jobs');
 
 // ── Profiles ────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,16 @@ function _profileQs(profileId) {
 export function fetchAgents(profileId) {
   const qs = _profileQs(profileId);
   return get(`/agents${qs ? '?' + qs : ''}`);
+}
+
+export function decommissionAgent(agentId, profileId) {
+  const qs = _profileQs(profileId);
+  return post(`/agents/${encodeURIComponent(agentId)}/decommission${qs ? '?' + qs : ''}`);
+}
+
+export function recommissionAgent(agentId, profileId) {
+  const qs = _profileQs(profileId);
+  return post(`/agents/${encodeURIComponent(agentId)}/recommission${qs ? '?' + qs : ''}`);
 }
 
 export function fetchPnl(profileId) {
