@@ -13,3 +13,18 @@ services:
     environment:
       DB_PATH: /data/db/ledger.db
       CSV_CACHE_DIR: /data/csv_cache
+
+  dashboard:
+    build: ./dashboard
+    restart: always
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/db:/data/db:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/db/ledger.db
+    depends_on:
+      - scheduler
