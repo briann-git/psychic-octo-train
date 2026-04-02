@@ -6,8 +6,9 @@ import PnLPage       from './pages/PnLPage';
 import AgentsPage    from './pages/AgentsPage';
 import FixturesPage  from './pages/FixturesPage';
 import LogsPage      from './pages/LogsPage';
-import SettingsPage  from './pages/SettingsPage';
-import useTradingMode from './hooks/useTradingMode';
+import ProfilesPage  from './pages/ProfilesPage';
+import SystemPage    from './pages/SystemPage';
+import useProfiles from './hooks/useProfiles';
 import useApi from './hooks/useApi';
 import { fetchPnl } from './api/endpoints';
 
@@ -18,7 +19,8 @@ const PAGES = {
   agents:    AgentsPage,
   fixtures:  FixturesPage,
   logs:      LogsPage,
-  settings:  SettingsPage,
+  profiles:  ProfilesPage,
+  system:    SystemPage,
 };
 
 function getInitialPage() {
@@ -28,7 +30,12 @@ function getInitialPage() {
 
 export default function App() {
   const [page, setPageState] = useState(getInitialPage);
-  const { mode, loading, switching, toggleMode, setMode } = useTradingMode();
+  const {
+    profiles, viewedProfile, mode, loading,
+    selectProfile, toggleActive, createProfile, removeProfile, reload: reloadProfiles,
+  } = useProfiles();
+
+  const profileId = viewedProfile ? viewedProfile.id : null;
 
   const setPage = useCallback((p) => {
     setPageState(p);
@@ -44,8 +51,9 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  // Sidebar summary data from PnL endpoint
-  const { data: pnlData } = useApi(fetchPnl, { interval: 60000 });
+  // Sidebar summary data from PnL endpoint — scoped to active profile
+  const pnlFetcher = useCallback(() => fetchPnl(profileId), [profileId]);
+  const { data: pnlData } = useApi(pnlFetcher, { interval: 60000 });
   const sidebarData = {
     netPnl:    pnlData ? pnlData.agents.reduce((s, a) => s + (a.net_pnl || 0), 0) : null,
     totalPicks: pnlData ? pnlData.agents.reduce((s, a) => s + (a.total_picks || 0), 0) : null,
@@ -66,11 +74,22 @@ export default function App() {
       page={page}
       setPage={setPage}
       mode={mode}
-      toggleMode={toggleMode}
-      switching={switching}
+      profiles={profiles}
+      viewedProfile={viewedProfile}
+      selectProfile={selectProfile}
       sidebarData={sidebarData}
     >
-      <PageComponent mode={mode} setMode={setMode} />
+      <PageComponent
+        mode={mode}
+        profileId={profileId}
+        profiles={profiles}
+        viewedProfile={viewedProfile}
+        selectProfile={selectProfile}
+        toggleActive={toggleActive}
+        createProfile={createProfile}
+        removeProfile={removeProfile}
+        reloadProfiles={reloadProfiles}
+      />
     </Shell>
   );
 }

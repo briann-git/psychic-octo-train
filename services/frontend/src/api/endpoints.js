@@ -1,13 +1,48 @@
-import { get, patch } from './client';
+import { get, post, patch, del } from './client';
 
 export const fetchStatus   = () => get('/status');
-export const fetchAgents   = () => get('/agents');
-export const fetchPnl      = () => get('/pnl');
 export const fetchConfig   = () => get('/config');
 export const updateConfig  = (body) => patch('/config', body);
+export const fetchJobs     = () => get('/jobs');
 
-export function fetchPicks({ status, agent, limit } = {}) {
+// ── Profiles ────────────────────────────────────────────────────────────────
+
+export const fetchProfiles     = () => get('/profiles');
+export const createProfile     = (body) => post('/profiles', body);
+export const fetchProfile      = (id) => get(`/profiles/${id}`);
+export const updateProfile     = (id, body) => patch(`/profiles/${id}`, body);
+export const deleteProfile     = (id) => del(`/profiles/${id}`);
+export const activateProfile   = (id) => post(`/profiles/${id}/activate`);
+
+// ── Profile-scoped data ─────────────────────────────────────────────────────
+
+function _profileQs(profileId) {
+  return profileId ? `profile=${encodeURIComponent(profileId)}` : '';
+}
+
+export function fetchAgents(profileId) {
+  const qs = _profileQs(profileId);
+  return get(`/agents${qs ? '?' + qs : ''}`);
+}
+
+export function decommissionAgent(agentId, profileId) {
+  const qs = _profileQs(profileId);
+  return post(`/agents/${encodeURIComponent(agentId)}/decommission${qs ? '?' + qs : ''}`);
+}
+
+export function recommissionAgent(agentId, profileId) {
+  const qs = _profileQs(profileId);
+  return post(`/agents/${encodeURIComponent(agentId)}/recommission${qs ? '?' + qs : ''}`);
+}
+
+export function fetchPnl(profileId) {
+  const qs = _profileQs(profileId);
+  return get(`/pnl${qs ? '?' + qs : ''}`);
+}
+
+export function fetchPicks({ status, agent, limit, profileId } = {}) {
   const p = new URLSearchParams();
+  if (profileId) p.set('profile', profileId);
   if (status) p.set('status', status);
   if (agent)  p.set('agent', agent);
   if (limit)  p.set('limit', String(limit));

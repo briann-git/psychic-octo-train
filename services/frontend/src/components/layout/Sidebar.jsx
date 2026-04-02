@@ -7,13 +7,15 @@ const NAV = [
   { id: 'agents',    icon: '⬡', label: 'Agents' },
   { id: 'fixtures',  icon: '▦', label: 'Fixtures' },
   { id: 'logs',      icon: '≡', label: 'Logs' },
-  { id: 'settings',  icon: '⚙', label: 'Settings' },
+  { id: 'profiles',  icon: '◉', label: 'Profiles' },
+  { id: 'system',    icon: '⚙', label: 'System' },
 ];
 
-export default function Sidebar({ page, setPage, mode, sidebarData }) {
-  const modeColor = mode === 'paper' ? tokens.colors.amber : tokens.colors.green;
-  const modeDim   = mode === 'paper' ? tokens.colors.amberDim : tokens.colors.greenDim;
+export default function Sidebar({ page, setPage, mode, viewedProfile, sidebarData }) {
+  const modeColor = mode === 'live' ? tokens.colors.green : mode === 'backtest' ? (tokens.colors.cyan ?? '#67e8f9') : tokens.colors.amber;
+  const modeDim   = mode === 'live' ? tokens.colors.greenDim : mode === 'backtest' ? (tokens.colors.cyanDim ?? 'rgba(103,232,249,.08)') : tokens.colors.amberDim;
   const { netPnl = null, totalPicks = null, quotaUsed = null, quotaTotal = null } = sidebarData || {};
+  const profileLabel = viewedProfile ? viewedProfile.name : (mode === 'paper' ? 'Paper Trading' : mode === 'live' ? 'Live Trading' : 'Backtest');
 
   return (
     <div style={{
@@ -49,7 +51,7 @@ export default function Sidebar({ page, setPage, mode, sidebarData }) {
 
       <div style={{ padding: tokens.spacing.lg, borderTop: `1px solid ${tokens.colors.border}`, marginTop: 'auto' }}>
         <div style={{ fontSize: tokens.fontSize.sm, letterSpacing: '.15em', textTransform: 'uppercase', color: tokens.colors.muted, marginBottom: 10 }}>
-          {mode === 'paper' ? 'Paper Trading' : 'Live Trading'}
+          {profileLabel}
         </div>
 
         {[

@@ -15,10 +15,12 @@ class LedgerNode:
     def __init__(
         self,
         ledger_service: LedgerService,
-        paper_trading: bool = True,
+        profile_id: str = "default-paper",
+        profile_type: str = "paper",
     ) -> None:
         self._service = ledger_service
-        self._paper_trading = paper_trading
+        self._profile_id = profile_id
+        self._profile_type = profile_type
 
     def __call__(self, state: BettingState) -> dict:
         # Ensure a verdict is present — if the pipeline short-circuited (e.g.
@@ -44,10 +46,10 @@ class LedgerNode:
             working_state["verdict"] = asdict(stub_verdict)
 
         try:
-            self._service.record(working_state)  # type: ignore[arg-type]
+            self._service.record(working_state, profile_id=self._profile_id)  # type: ignore[arg-type]
             result = {"recorded": True, "verdict": working_state["verdict"]}
 
-            if working_state.get("verdict") and self._paper_trading:
+            if working_state.get("verdict") and self._profile_type == "paper":
                 verdict = working_state["verdict"]
                 if verdict.get("recommendation") == "back":
                     logger.info(

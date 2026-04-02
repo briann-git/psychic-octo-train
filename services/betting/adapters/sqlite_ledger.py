@@ -10,6 +10,15 @@ from betting.models.odds import OddsSnapshot
 from betting.models.verdict import Verdict
 
 _DDL = """
+CREATE TABLE IF NOT EXISTS profiles (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    type            TEXT NOT NULL DEFAULT 'paper',
+    bankroll_start  REAL NOT NULL DEFAULT 1000.0,
+    is_active       INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS picks (
     id              TEXT PRIMARY KEY,
     fixture_id      TEXT NOT NULL,
@@ -28,7 +37,8 @@ CREATE TABLE IF NOT EXISTS picks (
     settled_at      TEXT,
     selection_odds  REAL,
     season          TEXT,
-    opening_odds    REAL
+    opening_odds    REAL,
+    profile_id      TEXT REFERENCES profiles(id)
 );
 
 CREATE TABLE IF NOT EXISTS skips (
@@ -43,7 +53,8 @@ CREATE TABLE IF NOT EXISTS skips (
     confidence      REAL,
     errors          TEXT,
     recorded_at     TEXT NOT NULL,
-    season          TEXT
+    season          TEXT,
+    profile_id      TEXT REFERENCES profiles(id)
 );
 
 DROP TABLE IF EXISTS odds_history;
@@ -134,36 +145,95 @@ class SqliteLedgerRepository(ILedgerRepository):
         if "opening_odds" not in cols:
             conn.execute("ALTER TABLE picks ADD COLUMN opening_odds REAL")
 
+        if "profile_id" not in cols:
+            conn.execute(
+                "ALTER TABLE picks ADD COLUMN profile_id TEXT REFERENCES profiles(id)"
+            )
+
         skip_cols = {row[1] for row in conn.execute("PRAGMA table_info(skips)")}
         if "season" not in skip_cols:
             conn.execute("ALTER TABLE skips ADD COLUMN season TEXT")
+        if "profile_id" not in skip_cols:
+            conn.execute(
+                "ALTER TABLE skips ADD COLUMN profile_id TEXT REFERENCES profiles(id)"
+            )
+
+        # Ensure default profile exists and backfill orphaned rows
+        self._ensure_default_profile(conn)
+
+        # Create profile indexes after columns are guaranteed to exist
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_picks_profile ON picks (profile_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_skips_profile ON skips (profile_id)")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
 
-    def record(self, state: BettingState) -> None:
+    @staticmethod
+    def _ensure_default_profile(conn: sqlite3.Connection) -> None:
+        """Creates the default paper profile and backfills orphaned rows."""
+        DEFAULT_ID = "default-paper"
+        row = conn.execute(
+            "SELECT id FROM profiles WHERE id = ?", (DEFAULT_ID,)
+        ).fetchone()
+        if row is None:
+            conn.execute(
+                """
+                INSERT INTO profiles (id, name, type, bankroll_start, is_active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    DEFAULT_ID,
+                    "Paper \u2013 Default",
+                    "paper",
+                    1000.0,
+                    1,
+                    datetime.now(tz=timezone.utc).isoformat(),
+                ),
+            )
+        conn.execute(
+            "UPDATE picks SET profile_id = ? WHERE profile_id IS NULL",
+            (DEFAULT_ID,),
+        )
+        conn.execute(
+            "UPDATE skips SET profile_id = ? WHERE profile_id IS NULL",
+            (DEFAULT_ID,),
+        )
+
+    def record(self, state: BettingState, profile_id: str = "default-paper") -> None:
         verdict = Verdict.from_dict(state["verdict"])  # type: ignore[arg-type]
         fixture = Fixture.from_dict(state["fixture"])
         odds = OddsSnapshot.from_dict(state["odds_snapshot"])
 
         if verdict.recommendation == "back":
-            self._write_pick(fixture, odds, verdict)
+            self._write_pick(fixture, odds, verdict, profile_id)
         else:
-            self._write_skip(fixture, odds, verdict, state.get("errors", []))
+            self._write_skip(fixture, odds, verdict, state.get("errors", []), profile_id)
 
-    def get_by_fixture(self, fixture_id: str) -> dict | None:
+    def get_by_fixture(self, fixture_id: str, profile_id: str | None = None) -> dict | None:
         with self._connect() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM picks WHERE fixture_id = ?", (fixture_id,)
-            )
+            if profile_id is not None:
+                cursor = conn.execute(
+                    "SELECT * FROM picks WHERE fixture_id = ? AND profile_id = ?",
+                    (fixture_id, profile_id),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM picks WHERE fixture_id = ?", (fixture_id,)
+                )
             row = cursor.fetchone()
             if row:
                 cols = [desc[0] for desc in cursor.description]
                 return dict(zip(cols, row))
 
-            cursor = conn.execute(
-                "SELECT * FROM skips WHERE fixture_id = ?", (fixture_id,)
-            )
+            if profile_id is not None:
+                cursor = conn.execute(
+                    "SELECT * FROM skips WHERE fixture_id = ? AND profile_id = ?",
+                    (fixture_id, profile_id),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM skips WHERE fixture_id = ?", (fixture_id,)
+                )
             row = cursor.fetchone()
             if row:
                 cols = [desc[0] for desc in cursor.description]
@@ -176,6 +246,7 @@ class SqliteLedgerRepository(ILedgerRepository):
         fixture: Fixture,
         odds: OddsSnapshot,
         verdict: Verdict,
+        profile_id: str = "default-paper",
     ) -> None:
         selection = verdict.selection
         selection_odds = odds.selections.get(selection, 0.0)
@@ -189,8 +260,8 @@ class SqliteLedgerRepository(ILedgerRepository):
                 INSERT OR REPLACE INTO picks
                 (id, fixture_id, home_team, away_team, league, kickoff,
                  market, selection, odds, stake, confidence, expected_value,
-                 recorded_at, selection_odds, season, opening_odds)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 recorded_at, selection_odds, season, opening_odds, profile_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -209,6 +280,7 @@ class SqliteLedgerRepository(ILedgerRepository):
                     selection_odds,
                     fixture.season,
                     opening_odds,
+                    profile_id,
                 ),
             )
 
@@ -218,6 +290,7 @@ class SqliteLedgerRepository(ILedgerRepository):
         odds: OddsSnapshot,
         verdict: Verdict,
         errors: list[str],
+        profile_id: str = "default-paper",
     ) -> None:
         skip_reason = verdict.skip_reason or verdict.recommendation
         errors_json = json.dumps(errors) if errors else None
@@ -227,8 +300,8 @@ class SqliteLedgerRepository(ILedgerRepository):
                 """
                 INSERT OR REPLACE INTO skips
                 (id, fixture_id, home_team, away_team, league, kickoff,
-                 market, skip_reason, confidence, errors, recorded_at, season)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 market, skip_reason, confidence, errors, recorded_at, season, profile_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -243,6 +316,7 @@ class SqliteLedgerRepository(ILedgerRepository):
                     errors_json,
                     datetime.now(tz=timezone.utc).isoformat(),
                     fixture.season,
+                    profile_id,
                 ),
             )
 
@@ -305,11 +379,17 @@ class SqliteLedgerRepository(ILedgerRepository):
                 rows.append(d)
             return rows
 
-    def get_pending_picks(self) -> list[dict]:
+    def get_pending_picks(self, profile_id: str | None = None) -> list[dict]:
         with self._connect() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM picks WHERE outcome IS NULL"
-            )
+            if profile_id is not None:
+                cursor = conn.execute(
+                    "SELECT * FROM picks WHERE outcome IS NULL AND profile_id = ?",
+                    (profile_id,),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM picks WHERE outcome IS NULL"
+                )
             cols = [desc[0] for desc in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
@@ -323,15 +403,25 @@ class SqliteLedgerRepository(ILedgerRepository):
                 (outcome, datetime.now(tz=timezone.utc).isoformat(), pick_id),
             )
 
-    def get_all_picks(self) -> list[dict]:
+    def get_all_picks(self, profile_id: str | None = None) -> list[dict]:
         with self._connect() as conn:
-            cursor = conn.execute("SELECT * FROM picks")
+            if profile_id is not None:
+                cursor = conn.execute(
+                    "SELECT * FROM picks WHERE profile_id = ?", (profile_id,)
+                )
+            else:
+                cursor = conn.execute("SELECT * FROM picks")
             cols = [desc[0] for desc in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
-    def get_all_skips(self) -> list[dict]:
+    def get_all_skips(self, profile_id: str | None = None) -> list[dict]:
         with self._connect() as conn:
-            cursor = conn.execute("SELECT * FROM skips")
+            if profile_id is not None:
+                cursor = conn.execute(
+                    "SELECT * FROM skips WHERE profile_id = ?", (profile_id,)
+                )
+            else:
+                cursor = conn.execute("SELECT * FROM skips")
             cols = [desc[0] for desc in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
 

@@ -6,8 +6,10 @@ import Badge from '../components/primitives/Badge';
 import useApi from '../hooks/useApi';
 import { fetchPnl } from '../api/endpoints';
 
-export default function PnLPage() {
-  const { data, loading } = useApi(fetchPnl, { interval: 30000 });
+import { useCallback } from 'react';
+
+export default function PnLPage({ profileId }) {
+  const { data, loading } = useApi(useCallback(() => fetchPnl(profileId), [profileId]), { interval: 30000 });
   const agents     = data?.agents     || [];
   const dailySeries = data?.daily_series || [];
 

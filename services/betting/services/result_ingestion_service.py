@@ -45,6 +45,7 @@ class ResultIngestionService:
         self,
         leagues: list[str],
         season: str | None = None,
+        profile_id: str | None = None,
     ) -> SettlementSummary:
         """
         Fetches recent results from the Odds API, matches against pending picks,
@@ -54,13 +55,13 @@ class ResultIngestionService:
         if season is None:
             from betting.utils import current_season
             season = current_season()
-        pending = self._ledger.get_pending_picks()
+        pending = self._ledger.get_pending_picks(profile_id=profile_id)
         if not pending:
             logger.info("No pending picks to settle")
             # Still settle agent picks even if no main picks are pending
             if self._agent_repo is not None:
                 results = self._load_results(leagues, season)
-                self._settle_agent_picks(results, datetime.now(tz=timezone.utc))
+                self._settle_agent_picks(results, datetime.now(tz=timezone.utc), profile_id=profile_id)
             return SettlementSummary()
 
         # Fetch results for all active leagues
@@ -104,7 +105,7 @@ class ResultIngestionService:
 
         # Settle agent picks from the same results
         if self._agent_repo is not None:
-            self._settle_agent_picks(results, now)
+            self._settle_agent_picks(results, now, profile_id=profile_id)
 
         return summary
 
@@ -202,14 +203,15 @@ class ResultIngestionService:
         self,
         results: dict[tuple[str, str], dict],
         now: datetime,
+        profile_id: str | None = None,
     ) -> None:
         """
         Settles agent_picks rows from results dict.
         Updates agent bankroll on won/void picks.
         """
-        agents = self._agent_repo.get_all_agents()
+        agents = self._agent_repo.get_all_agents(profile_id=profile_id)
         for agent in agents:
-            unsettled = self._agent_repo.get_unsettled_agent_picks(agent.id)
+            unsettled = self._agent_repo.get_unsettled_agent_picks(agent.id, profile_id=profile_id)
             for pick in unsettled:
                 kickoff = datetime.fromisoformat(pick["kickoff"])
                 if kickoff.tzinfo is None:
@@ -250,4 +252,4 @@ class ResultIngestionService:
                 elif outcome == "void":
                     agent.bankroll += pick["stake"]
                 agent.total_settled += 1
-                self._agent_repo.save_agent(agent)
+                self._agent_repo.save_agent(agent, profile_id=profile_id or "default-paper")

@@ -16,9 +16,11 @@ class AgentExecutionService:
         self,
         agent_repo: AgentRepository,
         flat_stake: float = 10.0,
+        profile_id: str = "default-paper",
     ) -> None:
         self._repo = agent_repo
         self._flat_stake = flat_stake
+        self._profile_id = profile_id
 
     def execute(
         self,
@@ -31,8 +33,10 @@ class AgentExecutionService:
         Runs the verdict through all four agents.
         Each agent independently decides to back or skip and records its decision.
         """
-        agents = self._repo.get_all_agents()
+        agents = self._repo.get_all_agents(profile_id=self._profile_id)
         for agent in agents:
+            if agent.is_decommissioned:
+                continue
             self._execute_for_agent(agent, verdict, fixture, odds, signals)
 
     def _execute_for_agent(
@@ -63,7 +67,7 @@ class AgentExecutionService:
         # 5. Deduct stake from bankroll
         agent.bankroll -= stake
         agent.total_picks += 1
-        self._repo.save_agent(agent)
+        self._repo.save_agent(agent, profile_id=self._profile_id)
 
         # 6. Record pick
         selection_odds = odds.selections.get(verdict.selection, 0.0)
@@ -87,7 +91,7 @@ class AgentExecutionService:
             "stat_edge": signal_map.get("statistical", {}).get("edge"),
             "market_confidence": signal_map.get("market", {}).get("confidence"),
             "market_edge": signal_map.get("market", {}).get("edge"),
-        })
+        }, profile_id=self._profile_id)
 
         logger.info(
             "[Agent %s] Backing %s vs %s — %s @ %.3f, stake=%.2f, "
