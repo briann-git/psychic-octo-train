@@ -136,7 +136,7 @@ def run_snapshot_job(
     """
     Fetches current odds for all eligible fixtures and persists to odds_history.
     Saves one snapshot per market per fixture.
-    snapshot_type: "opening" | "intermediate" | "pre_analysis"
+    snapshot_type: "opening" | "intermediate"
     """
     loader = market_loader or MarketConfigLoader()
     active_market_ids = [m.id for m in loader.active_markets()]
@@ -177,22 +177,20 @@ def run_backup_job() -> None:
         logger.info("Backup job completed")
     except Exception as exc:
         logger.error("Backup job failed: %s", exc)
-        # Non-fatal — do not raise, morning job must still run
+        # Non-fatal — do not raise, settlement job must still run
 
 
-def run_morning_job() -> None:
-    """08:00 — settle yesterday's results, then take opening snapshot."""
-    logger.info("Morning job started")
+def run_settlement_job() -> None:
+    """08:00 — settle yesterday's results."""
+    logger.info("Settlement job started")
     c = _build_components()
 
-    # Resolve all active profiles
     profile_repo = ProfileRepository(db_path=settings.db_path)
     active_profiles = profile_repo.get_all_active()
     if not active_profiles:
-        logger.warning("Morning job skipped — no active profiles")
+        logger.warning("Settlement job skipped — no active profiles")
         return
 
-    # 1. Settle pending picks per profile
     agent_repo = AgentRepository(db_path=settings.db_path)
     result_service = ResultIngestionService(
         odds_api=c.odds_api,
@@ -214,33 +212,59 @@ def run_morning_job() -> None:
             settlement.settled, settlement.won, settlement.lost,
             settlement.void, settlement.still_pending,
         )
-
-    # 2. Opening snapshot (shared across profiles)
-    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "opening", c.market_loader)
-    logger.info("Morning job completed")
+    logger.info("Settlement job completed")
 
 
-def run_analysis() -> None:
-    logger.info("Analysis run started")
+def run_continuous_job() -> None:
+    """
+    Runs on a configurable interval (run_interval_hours).
 
+    Phase 1 — Snapshot: fetches current odds for all fixtures in the wide
+    eligibility window [now+min_lead_hours, now+max_lead_hours] and persists
+    them to odds_history, accumulating movement data over time.
+
+    Phase 2 — Analysis: runs the full pipeline only for fixtures in the narrow
+    window [now+min_lead_hours, now+max_analysis_lead_hours], i.e. those
+    kicking off soon enough that a verdict is still actionable.
+    """
+    logger.info("Continuous job started")
     c = _build_components()
 
-    # Resolve all active profiles
+    # --- Phase 1: Snapshot (wide window) ---
+    leagues_in_window = _get_active_leagues_today(c)
+    if not leagues_in_window:
+        logger.info("Continuous job: no fixtures in window, skipping")
+        return
+
+    download_season_data(c.csv_service, leagues_in_window, c.season)
+    run_snapshot_job(
+        c.odds_api, c.fixture_service, c.ledger_repo,
+        "opening", c.market_loader, leagues=leagues_in_window,
+    )
+
+    # --- Phase 2: Analysis (narrow window) ---
+    active_market_ids = [m.id for m in c.market_loader.active_markets()]
+    eligible_for_analysis = c.fixture_service.get_eligible_fixtures_multi(
+        markets=active_market_ids,
+        max_lead_hours_override=settings.max_analysis_lead_hours,
+    )
+
+    if not eligible_for_analysis:
+        logger.info(
+            "Continuous job: no fixtures within %dh analysis window — snapshots taken",
+            settings.max_analysis_lead_hours,
+        )
+        return
+
     profile_repo = ProfileRepository(db_path=settings.db_path)
     active_profiles = profile_repo.get_all_active()
     if not active_profiles:
-        logger.warning("Analysis run skipped — no active profiles")
+        logger.warning("Continuous job: analysis skipped — no active profiles")
         return
 
-    leagues_today = _get_active_leagues_today(c)
-    if not leagues_today:
-        logger.info("Analysis run skipped — no fixtures today")
-        return
+    logger.info("Continuous job: %d fixture(s) eligible for analysis", len(eligible_for_analysis))
 
-    # Shared prep (not profile-specific)
-    download_season_data(c.csv_service, leagues_today, c.season)
-    run_snapshot_job(c.odds_api, c.fixture_service, c.ledger_repo, "pre_analysis", c.market_loader, leagues=leagues_today)
-
+    agent_repo = AgentRepository(db_path=settings.db_path)
     statistical_service = StatisticalService(
         stats_provider=c.stats_provider,
         market_loader=c.market_loader,
@@ -250,15 +274,7 @@ def run_analysis() -> None:
         market_loader=c.market_loader,
     )
     ledger_service = LedgerService(repository=c.ledger_repo)
-    agent_repo = AgentRepository(db_path=settings.db_path)
-    active_market_ids = [m.id for m in c.market_loader.active_markets()]
-    eligible = c.fixture_service.get_eligible_fixtures_multi(
-        markets=active_market_ids,
-        leagues=leagues_today,
-    )
-    logger.info("Found %d eligible fixture(s)", len(eligible))
 
-    # Run pipeline per active profile
     for profile in active_profiles:
         profile_id = profile.id
         profile_type = profile.type
@@ -281,7 +297,7 @@ def run_analysis() -> None:
             ledger_node=LedgerNode(ledger_service, profile_id=profile_id, profile_type=profile_type),
         )
 
-        for fixture, odds_list in eligible:
+        for fixture, odds_list in eligible_for_analysis:
             for odds in odds_list:
                 logger.info(
                     "[%s] Processing %s: %s vs %s, market=%s, kickoff %s",
@@ -322,10 +338,9 @@ def run_analysis() -> None:
                         profile.name, fixture.id, odds.market, exc,
                     )
 
-        # P&L summary for this profile
         _log_profile_pnl(c.ledger_repo, agent_repo, profile)
 
-    logger.info("Analysis run completed")
+    logger.info("Continuous job completed")
 
 
 def _log_profile_pnl(
@@ -468,22 +483,11 @@ def _get_active_leagues_today(c: _Components) -> list[str]:
     return active_today
 
 
-def _run_snapshot_from_fresh(snapshot_type: str) -> None:
-    """Builds fresh components and runs a snapshot job. Used by cron lambdas."""
-    c = _build_components()
-    leagues_today = _get_active_leagues_today(c)
-    if not leagues_today:
-        logger.info("Snapshot job (%s) skipped — no fixtures today", snapshot_type)
-        return
-    run_snapshot_job(
-        c.odds_api, c.fixture_service, c.ledger_repo,
-        snapshot_type, c.market_loader,
-        leagues=leagues_today,
-    )
 
 
 HEARTBEAT_DIR = os.environ.get("HEARTBEAT_DIR", "/data/heartbeat")
 HEARTBEAT_FILE = os.path.join(HEARTBEAT_DIR, "scheduler.json")
+SCHEDULE_FILE = os.path.join(HEARTBEAT_DIR, "schedule.json")
 
 
 def send_heartbeat() -> None:
@@ -500,6 +504,20 @@ def send_heartbeat() -> None:
     os.replace(tmp_path, HEARTBEAT_FILE)
 
 
+def _write_schedule(sched) -> None:
+    """Write each job's real next_run_time so the dashboard shows accurate countdowns."""
+    os.makedirs(HEARTBEAT_DIR, exist_ok=True)
+    payload = {}
+    for job in sched.get_jobs():
+        nrt = getattr(job, "next_run_time", None)
+        if nrt is not None:
+            payload[job.id] = nrt.isoformat()
+    tmp_path = SCHEDULE_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    os.replace(tmp_path, SCHEDULE_FILE)
+
+
 def main() -> None:
     # Bootstrap agents on first run for all active profiles
     agent_repo = AgentRepository(db_path=settings.db_path)
@@ -509,21 +527,30 @@ def main() -> None:
 
     scheduler = BlockingScheduler()
 
-    # Heartbeat every 10 minutes so dashboard can verify we are alive
-    scheduler.add_job(send_heartbeat, "interval", minutes=10, next_run_time=datetime.now(tz=timezone.utc))
+    # Heartbeat every 10 minutes — also writes real job next_run_times for the dashboard
+    def _heartbeat():
+        send_heartbeat()
+        _write_schedule(scheduler)
 
-    scheduler.add_job(run_backup_job, "cron", hour=settings.backup_hour, minute=0)
-    scheduler.add_job(run_morning_job, "cron", hour=settings.morning_hour, minute=0)
+    scheduler.add_job(_heartbeat, "interval", minutes=10, next_run_time=datetime.now(tz=timezone.utc))
+
+    scheduler.add_job(run_backup_job, "cron", hour=settings.backup_hour, minute=0, id="run_backup_job")
+    # Settlement runs once daily at morning_hour (fixed time, result-dependent)
+    scheduler.add_job(run_settlement_job, "cron", hour=settings.morning_hour, minute=0, id="run_settlement_job")
+    # Continuous job: snapshot + analysis on rolling interval
     scheduler.add_job(
-        lambda: _run_snapshot_from_fresh("intermediate"),
-        "cron", hour=settings.snapshot_hour, minute=0,
+        run_continuous_job,
+        "interval",
+        hours=settings.run_interval_hours,
+        next_run_time=datetime.now(tz=timezone.utc),
+        id="run_continuous_job",
     )
-    scheduler.add_job(run_analysis, "cron", hour=settings.analysis_hour, minute=0)
     # Weekly calendar refresh — Sunday at configured hour
     scheduler.add_job(
         run_calendar_refresh,
         "cron", day_of_week="sun",
         hour=settings.calendar_refresh_hour, minute=0,
+        id="run_calendar_refresh",
     )
     # Weekly agent recalibration — Sunday before calendar refresh
     recalibration_hour = (settings.calendar_refresh_hour - 1) % 24
@@ -531,6 +558,7 @@ def main() -> None:
         run_agent_recalibration,
         "cron", day_of_week="sun",
         hour=recalibration_hour, minute=0,
+        id="run_agent_recalibration",
     )
 
     # Bootstrap calendar on first run if empty
@@ -539,6 +567,12 @@ def main() -> None:
         run_calendar_refresh()
     except Exception as exc:
         logger.error("Calendar bootstrap failed: %s", exc)
+
+    # Write initial schedule so dashboard has accurate next_run_times immediately.
+    # Uses a scheduler-started event because next_run_times aren't populated until
+    # after start() initialises the job store.
+    from apscheduler.events import EVENT_SCHEDULER_STARTED
+    scheduler.add_listener(lambda _: _write_schedule(scheduler), EVENT_SCHEDULER_STARTED)
 
     scheduler.start()
 

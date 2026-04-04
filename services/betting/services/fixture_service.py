@@ -98,6 +98,7 @@ class FixtureService:
         self,
         markets: list[str],
         leagues: list[str] | None = None,
+        max_lead_hours_override: int | None = None,
     ) -> list[tuple[Fixture, list[OddsSnapshot]]]:
         """Return fixtures paired with an OddsSnapshot for *every* available market.
 
@@ -105,16 +106,22 @@ class FixtureService:
         of returning the first available market it collects snapshots for all
         requested markets that have odds.  Fixtures with no available odds for
         any market are excluded.
+
+        max_lead_hours_override: when supplied, caps the upper bound of the
+        eligibility window to this many hours ahead instead of max_lead_hours.
+        Use this for the analysis pass so only fixtures kicking off soon
+        generate verdicts, while the wider snapshot window stays unchanged.
         """
         effective_leagues = leagues if leagues is not None else self._supported_leagues
+        effective_max = max_lead_hours_override if max_lead_hours_override is not None else self._max_lead_hours
 
         now = datetime.now(tz=timezone.utc)
         earliest = now + timedelta(hours=self._min_lead_hours)
-        latest = now + timedelta(hours=self._max_lead_hours)
+        latest = now + timedelta(hours=effective_max)
 
         raw: list[Fixture] = self._fixture_provider.fetch_upcoming(
             leagues=effective_leagues,
-            days_ahead=self._max_lead_hours // 24 + 1,
+            days_ahead=effective_max // 24 + 1,
         )
 
         results: list[tuple[Fixture, list[OddsSnapshot]]] = []
