@@ -5,6 +5,7 @@ Runs via APScheduler on a daily cron schedule.
 
 import json
 import logging
+import math
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -518,6 +519,23 @@ def _write_schedule(sched) -> None:
     os.replace(tmp_path, SCHEDULE_FILE)
 
 
+def _next_aligned_run_time(interval_hours: int) -> datetime:
+    """Return the next wall-clock run time aligned to midnight UTC.
+
+    For a 4-hour interval the slots are 00:00, 04:00, 08:00, 12:00, 16:00,
+    20:00 UTC.  Using this as next_run_time means restarts never reset the
+    schedule — the job always fires at the next natural slot.
+    """
+    now = datetime.now(tz=timezone.utc)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    hours_since_midnight = (now - midnight).total_seconds() / 3600
+    next_slot_hours = (math.floor(hours_since_midnight / interval_hours) + 1) * interval_hours
+    if next_slot_hours >= 24:
+        next_slot_hours -= 24
+        midnight += timedelta(days=1)
+    return midnight + timedelta(hours=next_slot_hours)
+
+
 def main() -> None:
     # Bootstrap agents on first run for all active profiles
     agent_repo = AgentRepository(db_path=settings.db_path)
@@ -537,12 +555,13 @@ def main() -> None:
     scheduler.add_job(run_backup_job, "cron", hour=settings.backup_hour, minute=0, id="run_backup_job")
     # Settlement runs once daily at morning_hour (fixed time, result-dependent)
     scheduler.add_job(run_settlement_job, "cron", hour=settings.morning_hour, minute=0, id="run_settlement_job")
-    # Continuous job: snapshot + analysis on rolling interval
+    # Continuous job: snapshot + analysis on rolling interval.
+    # next_run_time is aligned to midnight UTC so restarts don't reset the clock.
     scheduler.add_job(
         run_continuous_job,
         "interval",
         hours=settings.run_interval_hours,
-        next_run_time=datetime.now(tz=timezone.utc),
+        next_run_time=_next_aligned_run_time(settings.run_interval_hours),
         id="run_continuous_job",
     )
     # Weekly calendar refresh — Sunday at configured hour
