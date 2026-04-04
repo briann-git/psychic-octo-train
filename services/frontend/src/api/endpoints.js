@@ -41,11 +41,12 @@ export function fetchPnl(profileId) {
   return get(`/pnl${qs ? '?' + qs : ''}`);
 }
 
-export function fetchPicks({ status, agent, limit, profileId } = {}) {
+export function fetchPicks({ status, agent, date, limit, profileId } = {}) {
   const p = new URLSearchParams();
   if (profileId) p.set('profile', profileId);
   if (status) p.set('status', status);
   if (agent)  p.set('agent', agent);
+  if (date)   p.set('date', date);
   if (limit)  p.set('limit', String(limit));
   const qs = p.toString();
   return get(`/picks${qs ? '?' + qs : ''}`);
