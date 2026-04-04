@@ -16,18 +16,6 @@ export default function StepAgents({ agents, onAgentsChange, preset, onPresetCha
     onAgentsChange(next);
   };
 
-  const addAgent = () => {
-    if (agents.length >= 5) return;
-    onPresetChange('custom');
-    onAgentsChange([...agents, defaultAgent()]);
-  };
-
-  const removeAgent = () => {
-    if (agents.length <= 1) return;
-    onPresetChange('custom');
-    onAgentsChange(agents.slice(0, -1));
-  };
-
   const total = agents.reduce((s, a) => s + (a.bankroll || 0), 0);
 
   return (
@@ -62,30 +50,38 @@ export default function StepAgents({ agents, onAgentsChange, preset, onPresetCha
         </div>
       </div>
 
-      {/* Agent count controls */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <span style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: tokens.colors.muted }}>
-          Agents ({agents.length})
-        </span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <div
-            onClick={removeAgent}
-            style={{
-              padding: '3px 10px', fontSize: 11, cursor: agents.length <= 1 ? 'not-allowed' : 'pointer',
-              border: `1px solid ${tokens.colors.border}`, background: tokens.colors.surface2,
-              color: agents.length <= 1 ? tokens.colors.dim : tokens.colors.text,
-              opacity: agents.length <= 1 ? 0.4 : 1,
-            }}
-          >− Remove</div>
-          <div
-            onClick={addAgent}
-            style={{
-              padding: '3px 10px', fontSize: 11, cursor: agents.length >= 5 ? 'not-allowed' : 'pointer',
-              border: `1px solid ${tokens.colors.green}`, background: tokens.colors.greenDim,
-              color: agents.length >= 5 ? tokens.colors.dim : tokens.colors.green,
-              opacity: agents.length >= 5 ? 0.4 : 1,
-            }}
-          >+ Add</div>
+      {/* Agent count selector */}
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ display: 'block', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: tokens.colors.muted, marginBottom: 6 }}>
+          Number of agents
+        </label>
+        <div style={{ display: 'flex', gap: 0 }}>
+          {[1, 2, 3, 4, 5].map(n => {
+            const active = agents.length === n;
+            return (
+              <div
+                key={n}
+                onClick={() => {
+                  if (n === agents.length) return;
+                  onPresetChange('custom');
+                  if (n > agents.length) {
+                    const extras = Array.from({ length: n - agents.length }, () => defaultAgent());
+                    onAgentsChange([...agents, ...extras]);
+                  } else {
+                    onAgentsChange(agents.slice(0, n));
+                  }
+                }}
+                style={{
+                  flex: 1, padding: '8px 0', textAlign: 'center',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  border: `1px solid ${active ? tokens.colors.green : tokens.colors.border}`,
+                  background: active ? tokens.colors.greenDim : tokens.colors.surface2,
+                  color: active ? tokens.colors.green : tokens.colors.muted,
+                  transition: 'all .15s',
+                }}
+              >{n}</div>
+            );
+          })}
         </div>
       </div>
 

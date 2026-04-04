@@ -73,9 +73,9 @@ export default function PicksFeedPage({ profileId }) {
                   <tr key={i}>
                     <td><AgentTag id={p.agent_id} /></td>
                     <td style={{ color: tokens.colors.muted, fontSize: 11 }}>{p.league}</td>
-                    <td>{p.home} v {p.away}</td>
-                    <td style={{ fontWeight: 500 }}>{p.selection_id}</td>
-                    <td>{(+(p.selection_odds || 0)).toFixed(2)}</td>
+                    <td>{p.home_team} v {p.away_team}</td>
+                    <td style={{ fontWeight: 500 }}>{p.selection}</td>
+                    <td>{(+(p.odds || 0)).toFixed(2)}</td>
                     <td>£{(+(p.stake || 0)).toFixed(2)}</td>
                     <td style={{ color: tokens.colors.blue }}>
                       {p.stat_confidence != null ? `${(p.stat_confidence * 100).toFixed(1)}%` : '—'}
