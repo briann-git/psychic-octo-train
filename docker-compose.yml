@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   scheduler:
     build: .
@@ -16,13 +14,11 @@ services:
       DB_PATH: /data/db/ledger.db
       CSV_CACHE_DIR: /data/csv_cache
 
-  dashboard:
+  backend:
     build:
       context: ./services
-      dockerfile: Dockerfile.dashboard
+      dockerfile: Dockerfile.backend
     restart: always
-    ports:
-      - "8080:8080"
     volumes:
       - ./data/db:/data/db
       - ./data/logs:/data/logs:ro
@@ -33,3 +29,16 @@ services:
       DB_PATH: /data/db/ledger.db
     depends_on:
       - scheduler
+    # Not exposed externally — only reachable by the frontend container
+    expose:
+      - "8080"
+
+  frontend:
+    build:
+      context: ./services
+      dockerfile: Dockerfile.frontend
+    restart: always
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
