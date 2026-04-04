@@ -21,6 +21,7 @@ LOG_DIR = os.environ.get("LOG_DIR", "/data/logs")
 LOG_FILE = os.path.join(LOG_DIR, "scheduler.log")
 HEARTBEAT_DIR = os.environ.get("HEARTBEAT_DIR", "/data/heartbeat")
 HEARTBEAT_FILE = os.path.join(HEARTBEAT_DIR, "scheduler.json")
+SCHEDULE_FILE = os.path.join(HEARTBEAT_DIR, "schedule.json")
 HEARTBEAT_STALE_SECONDS = 15 * 60  # 15 minutes — heartbeat is every 10 min
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -135,8 +136,8 @@ async def create_profile(request: Request):
     for i, a in enumerate(agents_cfg):
         if not isinstance(a.get("bankroll"), (int, float)) or a["bankroll"] <= 0:
             raise HTTPException(status_code=400, detail=f"Agent {AGENT_IDS[i]}: bankroll must be a positive number")
-        if not 0.50 <= a.get("confidence_threshold", 0) <= 0.90:
-            raise HTTPException(status_code=400, detail=f"Agent {AGENT_IDS[i]}: confidence_threshold must be 0.50-0.90")
+        if not 0.30 <= a.get("confidence_threshold", 0) <= 0.90:
+            raise HTTPException(status_code=400, detail=f"Agent {AGENT_IDS[i]}: confidence_threshold must be 0.30-0.90")
         if a.get("staking_strategy") not in ("flat", "kelly"):
             raise HTTPException(status_code=400, detail=f"Agent {AGENT_IDS[i]}: staking_strategy must be flat or kelly")
         sw = a.get("statistical_weight", 0.7)
@@ -638,7 +639,8 @@ async def stream_logs():
 _SAFE_KEYS = {
     "DB_PATH", "CONFIDENCE_THRESHOLD", "FLAT_STAKE",
     "MIN_LEAD_HOURS", "MAX_LEAD_HOURS", "LOG_LEVEL",
-    "BACKUP_HOUR", "MORNING_HOUR", "SNAPSHOT_HOUR", "ANALYSIS_HOUR",
+    "BACKUP_HOUR", "MORNING_HOUR",
+    "RUN_INTERVAL_HOURS", "MAX_ANALYSIS_LEAD_HOURS",
     "CALENDAR_LOOKAHEAD_DAYS", "CALENDAR_REFRESH_HOUR",
     "BETTING_LEAGUES_CONFIG", "BETTING_MARKETS_CONFIG",
     "CSV_CACHE_DIR", "CSV_MAX_AGE_HOURS",
@@ -672,6 +674,25 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _read_schedule() -> dict:
+    """Read next_run_times written by the scheduler process. Returns {} if unavailable."""
+    try:
+        with open(SCHEDULE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+# Maps APScheduler job IDs -> dashboard job IDs
+_SCHEDULE_KEY_MAP = {
+    "run_backup_job":          "backup",
+    "run_settlement_job":      "settlement",
+    "run_continuous_job":      "continuous",
+    "run_agent_recalibration": "recalibration",
+    "run_calendar_refresh":    "calendar_refresh",
+}
+
+
 @app.get("/api/jobs")
 def get_scheduled_jobs():
     """Return the list of scheduler jobs with their next run time."""
@@ -679,10 +700,24 @@ def get_scheduled_jobs():
     now = datetime.now(tz=timezone.utc)
     today = now.date()
 
+    # Real next_run_times from the scheduler process (written every 10 min).
+    # Discard stale entries (past timestamps) so the computed fallback is used instead.
+    schedule = _read_schedule()
+    actual: dict[str, str] = {}
+    for k, v in _SCHEDULE_KEY_MAP.items():
+        if k not in schedule:
+            continue
+        try:
+            dt = datetime.fromisoformat(schedule[k])
+            if dt > now:
+                actual[v] = schedule[k]
+        except (ValueError, TypeError):
+            pass
+
+    backup_hour = _env_int("BACKUP_HOUR", 4)
     morning_hour = _env_int("MORNING_HOUR", 8)
-    snapshot_hour = _env_int("SNAPSHOT_HOUR", 12)
-    analysis_hour = _env_int("ANALYSIS_HOUR", 14)
-    backup_hour = _env_int("BACKUP_HOUR", 3)
+    run_interval_hours = _env_int("RUN_INTERVAL_HOURS", 4)
+    max_analysis_lead_hours = _env_int("MAX_ANALYSIS_LEAD_HOURS", 6)
     calendar_refresh_hour = _env_int("CALENDAR_REFRESH_HOUR", 20)
     recalibration_hour = (calendar_refresh_hour - 1) % 24
 
@@ -691,6 +726,11 @@ def get_scheduled_jobs():
         candidate = datetime(today.year, today.month, today.day, hour, 0, 0, tzinfo=timezone.utc)
         if candidate <= now:
             candidate += timedelta(days=1)
+        return candidate.isoformat()
+
+    def _next_interval(interval_hours: int) -> str:
+        """Next occurrence of a repeating interval job."""
+        candidate = now + timedelta(hours=interval_hours)
         return candidate.isoformat()
 
     def _next_weekly_sun(hour: int) -> str:
@@ -706,12 +746,11 @@ def get_scheduled_jobs():
         return candidate.isoformat()
 
     return [
-        {"id": "backup",            "label": "Backup",              "schedule": f"Daily {backup_hour:02d}:00 UTC",    "next_run": _next_daily(backup_hour)},
-        {"id": "morning",           "label": "Morning Settlement",  "schedule": f"Daily {morning_hour:02d}:00 UTC",   "next_run": _next_daily(morning_hour)},
-        {"id": "snapshot",          "label": "Odds Snapshot",       "schedule": f"Daily {snapshot_hour:02d}:00 UTC",  "next_run": _next_daily(snapshot_hour)},
-        {"id": "analysis",          "label": "Analysis Run",        "schedule": f"Daily {analysis_hour:02d}:00 UTC",  "next_run": _next_daily(analysis_hour)},
-        {"id": "recalibration",     "label": "Agent Recalibration", "schedule": f"Sun {recalibration_hour:02d}:00 UTC",  "next_run": _next_weekly_sun(recalibration_hour)},
-        {"id": "calendar_refresh",  "label": "Calendar Refresh",    "schedule": f"Sun {calendar_refresh_hour:02d}:00 UTC", "next_run": _next_weekly_sun(calendar_refresh_hour)},
+        {"id": "backup",           "label": "Backup",              "schedule": f"Daily {backup_hour:02d}:00 UTC",                                        "next_run": actual.get("backup",           _next_daily(backup_hour))},
+        {"id": "settlement",       "label": "Settlement",          "schedule": f"Daily {morning_hour:02d}:00 UTC",                                       "next_run": actual.get("settlement",       _next_daily(morning_hour))},
+        {"id": "continuous",       "label": "Snapshot + Analysis", "schedule": f"Every {run_interval_hours}h (analysis window: {max_analysis_lead_hours}h)", "next_run": actual.get("continuous",   _next_interval(run_interval_hours))},
+        {"id": "recalibration",    "label": "Agent Recalibration", "schedule": f"Sun {recalibration_hour:02d}:00 UTC",                                   "next_run": actual.get("recalibration",    _next_weekly_sun(recalibration_hour))},
+        {"id": "calendar_refresh", "label": "Calendar Refresh",    "schedule": f"Sun {calendar_refresh_hour:02d}:00 UTC",                                "next_run": actual.get("calendar_refresh", _next_weekly_sun(calendar_refresh_hour))},
     ]
 
 
@@ -731,10 +770,12 @@ async def serve_spa(full_path: str):
         mime, _ = mimetypes.guess_type(str(target))
         return FileResponse(str(target), media_type=mime or "application/octet-stream")
 
-    index = static_root / "index.html"
-    if index.is_file():
+    # Route /mobile and /mobile/* to the mobile SPA; everything else to the desktop SPA
+    is_mobile_route = full_path == "mobile" or full_path.startswith("mobile/")
+    spa_index = static_root / ("mobile/index.html" if is_mobile_route else "index.html")
+    if spa_index.is_file():
         return FileResponse(
-            str(index),
+            str(spa_index),
             media_type="text/html",
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
