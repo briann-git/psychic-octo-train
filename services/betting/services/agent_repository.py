@@ -361,7 +361,7 @@ class AgentRepository:
                 policy=BanditPolicy(
                     statistical_weight=0.80,
                     market_weight=0.20,
-                    confidence_threshold=0.62,
+                    confidence_threshold=0.40,
                     staking_strategy="flat",
                 ),
                 bankroll=bankroll_start,
@@ -374,7 +374,7 @@ class AgentRepository:
                 policy=BanditPolicy(
                     statistical_weight=0.40,
                     market_weight=0.60,
-                    confidence_threshold=0.65,
+                    confidence_threshold=0.42,
                     staking_strategy="flat",
                 ),
                 bankroll=bankroll_start,
@@ -387,7 +387,7 @@ class AgentRepository:
                 policy=BanditPolicy(
                     statistical_weight=0.60,
                     market_weight=0.40,
-                    confidence_threshold=0.70,
+                    confidence_threshold=0.44,
                     staking_strategy="flat",
                 ),
                 bankroll=bankroll_start,
@@ -400,7 +400,7 @@ class AgentRepository:
                 policy=BanditPolicy(
                     statistical_weight=0.50,
                     market_weight=0.50,
-                    confidence_threshold=0.60,
+                    confidence_threshold=0.40,
                     staking_strategy="kelly",
                     kelly_fraction=0.25,
                 ),
