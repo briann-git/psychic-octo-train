@@ -17,8 +17,19 @@ def cache_dir(tmp_path):
     return str(tmp_path / "csv_cache")
 
 
+def _make_league_loader() -> MagicMock:
+    """Return a league loader that recognises 'PL' with football-data code 'E0'."""
+    loader = MagicMock()
+    loader.football_data_code.side_effect = lambda league: "E0" if league == "PL" else None
+    return loader
+
+
 def _make_service(cache_dir: str, max_age_hours: int = 24) -> CsvDownloadService:
-    return CsvDownloadService(cache_dir=cache_dir, max_age_hours=max_age_hours)
+    return CsvDownloadService(
+        cache_dir=cache_dir,
+        max_age_hours=max_age_hours,
+        league_loader=_make_league_loader(),
+    )
 
 
 def _write_cache(service: CsvDownloadService, league: str, season: str, content: str = "data") -> Path:

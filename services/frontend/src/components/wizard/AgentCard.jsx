@@ -73,7 +73,7 @@ export default function AgentCard({ index, agent, onChange }) {
       <SliderRow
         label="Confidence"
         value={agent.confidence_threshold}
-        min={0.50} max={0.90} step={0.01}
+        min={0.30} max={0.90} step={0.01}
         format={v => v.toFixed(2)}
         onChange={v => update('confidence_threshold', v)}
       />

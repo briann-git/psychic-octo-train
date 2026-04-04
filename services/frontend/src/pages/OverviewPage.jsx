@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import tokens from '../tokens';
 import Card from '../components/primitives/Card';
 import CardTitle from '../components/primitives/CardTitle';
@@ -19,6 +19,12 @@ export default function OverviewPage({ profileId }) {
   const { data: picks }    = useApi(useCallback(() => fetchPicks({ limit: 6, profileId }), [profileId]), { interval: 30000 });
   const { data: fixtures } = useApi(useCallback(() => fetchFixtures({ date: today }), [today]), { interval: 60000 });
   const { data: jobs }     = useApi(fetchJobs, { interval: 60000 });
+
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const allAgents = agents || [];
   const allPicks  = picks  || [];
@@ -92,9 +98,9 @@ export default function OverviewPage({ profileId }) {
                 {allPicks.map((p, i) => (
                   <tr key={i}>
                     <td><AgentTag id={p.agent_id} /></td>
-                    <td><span style={{ color: tokens.colors.muted, fontSize: 10 }}>{p.league} </span>{p.home} v {p.away}</td>
-                    <td>{p.selection_id}</td>
-                    <td>{(+(p.selection_odds || 0)).toFixed(2)}</td>
+                    <td><span style={{ color: tokens.colors.muted, fontSize: 10 }}>{p.league} </span>{p.home_team} v {p.away_team}</td>
+                    <td>{p.selection}</td>
+                    <td>{(+(p.odds || 0)).toFixed(2)}</td>
                     <td><Badge type={p.outcome || 'pending'}>{p.outcome || 'pending'}</Badge></td>
                   </tr>
                 ))}
@@ -152,7 +158,6 @@ export default function OverviewPage({ profileId }) {
           <CardTitle>Scheduled Jobs</CardTitle>
           {(jobs || []).length ? (jobs || []).map(j => {
             const next = j.next_run ? new Date(j.next_run) : null;
-            const now = Date.now();
             const diffMs = next ? next.getTime() - now : 0;
             const diffH = Math.floor(diffMs / 3_600_000);
             const diffM = Math.floor((diffMs % 3_600_000) / 60_000);

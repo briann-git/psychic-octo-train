@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     odds_api_key: str                   # required — no default
     db_path: str = "ledger.db"
-    confidence_threshold: float = 0.60
+    confidence_threshold: float = 0.40
     min_lead_hours: int = 2
     max_lead_hours: int = 48
     flat_stake: float = 10.0
@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     backup_dir: str = "/data/backups"
     backup_hour: int = 4
     morning_hour: int = 8
-    snapshot_hour: int = 12
-    analysis_hour: int = 16
+    run_interval_hours: int = 4
+    max_analysis_lead_hours: int = 6
     oci_namespace: str = ""
     oci_bucket: str = "betting-backups"
     backup_local_retention_days: int = 7

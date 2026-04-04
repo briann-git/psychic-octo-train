@@ -42,7 +42,11 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             if sport_key is None:
                 logger.warning("League %r not in config — skipping", league)
                 continue
-            events = self._fetch_events(sport_key)
+            try:
+                events = self._fetch_events(sport_key)
+            except Exception:
+                logger.warning("Failed to fetch events for league %r (sport_key=%r) — skipping", league, sport_key)
+                continue
             for event in events:
                 results.append(self._to_fixture(event, league))
         return results
