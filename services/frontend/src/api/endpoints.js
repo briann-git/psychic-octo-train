@@ -4,6 +4,7 @@ export const fetchStatus   = () => get('/status');
 export const fetchConfig   = () => get('/config');
 export const updateConfig  = (body) => patch('/config', body);
 export const fetchJobs     = () => get('/jobs');
+export const fetchQuota    = () => get('/quota');
 
 // ── Profiles ────────────────────────────────────────────────────────────────
 

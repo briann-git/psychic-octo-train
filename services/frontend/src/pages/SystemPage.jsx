@@ -1,15 +1,17 @@
+import { useCallback } from 'react';
 import tokens from '../tokens';
 import Card from '../components/primitives/Card';
 import CardTitle from '../components/primitives/CardTitle';
 import SectionTitle from '../components/primitives/SectionTitle';
 import useApi from '../hooks/useApi';
 import useTimezone from '../hooks/useTimezone';
-import { fetchConfig } from '../api/endpoints';
+import { fetchConfig, fetchQuota } from '../api/endpoints';
 
 const CONFIG_KEYS = [
   'CONFIDENCE_THRESHOLD', 'FLAT_STAKE', 'MIN_LEAD_HOURS', 'MAX_LEAD_HOURS',
-  'LOG_LEVEL', 'BACKUP_HOUR', 'MORNING_HOUR', 'SNAPSHOT_HOUR',
-  'ANALYSIS_HOUR', 'CALENDAR_LOOKAHEAD_DAYS', 'CALENDAR_REFRESH_HOUR',
+  'LOG_LEVEL', 'BACKUP_HOUR', 'MORNING_HOUR',
+  'RUN_INTERVAL_HOURS', 'MAX_ANALYSIS_LEAD_HOURS',
+  'CALENDAR_LOOKAHEAD_DAYS', 'CALENDAR_REFRESH_HOUR',
 ];
 
 const COMMON_TIMEZONES = [
@@ -37,8 +39,62 @@ const COMMON_TIMEZONES = [
   'America/Sao_Paulo',
 ];
 
+function OddsApiQuota({ quota }) {
+  if (!quota) {
+    return (
+      <div style={{ fontSize: 12, color: tokens.colors.muted }}>Loading…</div>
+    );
+  }
+
+  const { remaining, used, last, updated_at } = quota;
+
+  if (remaining === null && used === null) {
+    return (
+      <>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
+          <span style={{ color: tokens.colors.muted }}>Odds API</span>
+          <span style={{ color: tokens.colors.muted, fontSize: 11 }}>No data yet</span>
+        </div>
+        <div style={{ height: 6, background: tokens.colors.border }} />
+        <div style={{ fontSize: 10, color: tokens.colors.muted, marginTop: 6 }}>
+          Quota is captured from the next API call
+        </div>
+      </>
+    );
+  }
+
+  const total = remaining + used;
+  const pct = total > 0 ? (remaining / total) * 100 : 0;
+  const barColor = pct > 30 ? tokens.colors.green : pct > 10 ? tokens.colors.amber : tokens.colors.red;
+
+  const updatedLabel = updated_at
+    ? new Date(updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null;
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
+        <span style={{ color: tokens.colors.muted }}>Odds API</span>
+        <span style={{ color: barColor, fontFamily: tokens.fonts.mono }}>
+          {remaining.toLocaleString()} remaining
+        </span>
+      </div>
+      <div style={{ height: 6, background: tokens.colors.border, borderRadius: 3 }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 3, transition: 'width 0.4s' }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: tokens.colors.muted, marginTop: 6 }}>
+        <span>{used.toLocaleString()} used · {last != null ? `last call: ${last}` : ''}</span>
+        {updatedLabel && <span>as of {updatedLabel}</span>}
+      </div>
+    </>
+  );
+}
+
+
 export default function SystemPage({ profiles }) {
   const { data: config, loading } = useApi(fetchConfig, { interval: 0 });
+  const fetchQuotaCb = useCallback(fetchQuota, []);
+  const { data: quota } = useApi(fetchQuotaCb, { interval: 60000 });
   const { tz, setTimezone, fmt } = useTimezone();
   const activeCount = (profiles || []).filter(p => p.is_active).length;
 
@@ -109,11 +165,7 @@ export default function SystemPage({ profiles }) {
               <div style={{ fontSize: 10, color: tokens.colors.muted, marginTop: 6 }}>CSV source — no request limits</div>
             </div>
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
-                <span style={{ color: tokens.colors.muted }}>Odds API</span>
-                <span style={{ color: tokens.colors.text }}>See provider dashboard</span>
-              </div>
-              <div style={{ height: 6, background: tokens.colors.border }} />
+              <OddsApiQuota quota={quota} />
             </div>
           </div>
         </Card>

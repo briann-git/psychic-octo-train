@@ -1,4 +1,7 @@
+import json
 import logging
+import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +16,32 @@ from betting.models.odds import OddsSnapshot
 from betting.utils import season_from_date
 
 logger = logging.getLogger(__name__)
+
+_HEARTBEAT_DIR = os.environ.get("HEARTBEAT_DIR", "/data/heartbeat")
+_QUOTA_FILE = os.path.join(_HEARTBEAT_DIR, "odds_quota.json")
+
+
+def _persist_quota(response: httpx.Response) -> None:
+    """Write x-requests-* headers from an Odds API response to a JSON file."""
+    remaining = response.headers.get("x-requests-remaining")
+    used = response.headers.get("x-requests-used")
+    last = response.headers.get("x-requests-last")
+    if remaining is None and used is None:
+        return
+    payload = {
+        "remaining": int(remaining) if remaining is not None else None,
+        "used": int(used) if used is not None else None,
+        "last": int(last) if last is not None else None,
+        "updated_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    try:
+        os.makedirs(_HEARTBEAT_DIR, exist_ok=True)
+        tmp = _QUOTA_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp, _QUOTA_FILE)
+    except OSError as exc:
+        logger.warning("Could not write odds quota file: %s", exc)
 
 PREFERRED_BOOKMAKERS: list[str] = ["bet365", "williamhill", "betfair_ex_eu"]
 
@@ -133,6 +162,7 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             )
             raise
 
+        _persist_quota(response)
         events: list[dict] = response.json()
         self._cache[sport_key] = events
         return events

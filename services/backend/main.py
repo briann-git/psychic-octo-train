@@ -22,6 +22,7 @@ LOG_FILE = os.path.join(LOG_DIR, "scheduler.log")
 HEARTBEAT_DIR = os.environ.get("HEARTBEAT_DIR", "/data/heartbeat")
 HEARTBEAT_FILE = os.path.join(HEARTBEAT_DIR, "scheduler.json")
 SCHEDULE_FILE = os.path.join(HEARTBEAT_DIR, "schedule.json")
+QUOTA_FILE = os.path.join(HEARTBEAT_DIR, "odds_quota.json")
 HEARTBEAT_STALE_SECONDS = 15 * 60  # 15 minutes — heartbeat is every 10 min
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -663,6 +664,16 @@ async def update_config(request: Request):
         os.environ[key] = str(value)
         updated[key] = str(value)
     return updated
+
+
+@app.get("/api/quota")
+def get_quota():
+    """Return the latest Odds API quota figures captured from response headers."""
+    try:
+        with open(QUOTA_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"remaining": None, "used": None, "last": None, "updated_at": None}
 
 
 # ─── Scheduled Jobs ──────────────────────────────────────────────────────────
