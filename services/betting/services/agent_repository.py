@@ -280,6 +280,24 @@ class AgentRepository:
                 ),
             )
 
+    def get_unsettled_agent_picks_for_fixture(
+        self, fixture_id: str, profile_id: str | None = None
+    ) -> list[dict]:
+        """Returns all agent_picks where outcome IS NULL for a specific fixture."""
+        with self._connect() as conn:
+            if profile_id is not None:
+                cursor = conn.execute(
+                    "SELECT * FROM agent_picks WHERE fixture_id = ? AND profile_id = ? AND outcome IS NULL",
+                    (fixture_id, profile_id),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM agent_picks WHERE fixture_id = ? AND outcome IS NULL",
+                    (fixture_id,),
+                )
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
     def get_unsettled_agent_picks(self, agent_id: str, profile_id: str | None = None) -> list[dict]:
         """Returns agent_picks where outcome IS NULL."""
         with self._connect() as conn:

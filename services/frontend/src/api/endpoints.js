@@ -67,3 +67,20 @@ export function fetchLogs({ level, limit } = {}) {
   const qs = p.toString();
   return get(`/logs${qs ? '?' + qs : ''}`);
 }
+
+// ── Backtest ──────────────────────────────────────────────────────────────────
+
+export const runBacktest = (profileId, config) =>
+  post('/backtest/run', { profile_id: profileId, ...config });
+
+export const fetchBacktestReports = (profileId) => {
+  const qs = profileId ? `?profile=${encodeURIComponent(profileId)}` : '';
+  return get(`/backtest/reports${qs}`);
+};
+
+export const fetchBacktestReport = (reportId) =>
+  get(`/backtest/reports/${encodeURIComponent(reportId)}`);
+
+export const deleteBacktestReport = (reportId) =>
+  del(`/backtest/reports/${encodeURIComponent(reportId)}`);
+

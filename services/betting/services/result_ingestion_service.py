@@ -109,6 +109,71 @@ class ResultIngestionService:
 
         return summary
 
+    def settle_fixture_directly(
+        self,
+        fixture,
+        result: dict,
+        profile_id: str | None = None,
+    ) -> SettlementSummary:
+        """
+        Settles all pending picks for a single fixture using a pre-known result.
+        Designed for backtesting — skips API/CSV lookup and settlement lag checks.
+        ``result`` must contain the keys needed by OutcomeEvaluator (e.g. ftr, fthg, ftag).
+        """
+        summary = SettlementSummary()
+
+        # Settle ledger-level picks
+        pending = self._ledger.get_pending_picks(profile_id=profile_id)
+        for pick in pending:
+            if (pick["home_team"], pick["away_team"]) != (fixture.home_team, fixture.away_team):
+                continue
+            outcome = self._determine_outcome(pick["selection"], pick["market"], result)
+            self._ledger.settle_pick(pick["id"], outcome)
+            summary.settled += 1
+            if outcome == "won":
+                summary.won += 1
+            elif outcome == "lost":
+                summary.lost += 1
+            else:
+                summary.void += 1
+
+        # Settle agent-level picks
+        if self._agent_repo is not None:
+            agents = self._agent_repo.get_all_agents(profile_id=profile_id)
+            for agent in agents:
+                unsettled = self._agent_repo.get_unsettled_agent_picks_for_fixture(
+                    fixture.id, profile_id=profile_id
+                )
+                for pick in unsettled:
+                    selection = self._market_loader.get_selection(
+                        pick["market"], pick["selection"]
+                    )
+                    outcome = self._evaluator.evaluate(selection, result) if selection else "void"
+
+                    clv = None
+                    opening_odds = pick.get("opening_odds")
+                    analysis_odds = pick.get("odds")
+                    if opening_odds and analysis_odds and opening_odds > 0 and analysis_odds > 0:
+                        clv = (1.0 / opening_odds) - (1.0 / analysis_odds)
+
+                    if outcome == "won":
+                        pnl = pick["odds"] * pick["stake"] - pick["stake"]
+                    elif outcome == "void":
+                        pnl = 0.0
+                    else:
+                        pnl = -pick["stake"]
+
+                    self._agent_repo.settle_agent_pick(pick["id"], outcome, clv, pnl)
+
+                    if outcome == "won":
+                        agent.bankroll += pick["odds"] * pick["stake"]
+                    elif outcome == "void":
+                        agent.bankroll += pick["stake"]
+                    agent.total_settled += 1
+                    self._agent_repo.save_agent(agent, profile_id=profile_id or "default-paper")
+
+        return summary
+
     def _load_results(self, leagues: list[str], season: str) -> dict[tuple[str, str], dict]:
         """
         Routes settlement data fetching by market settlement_source.

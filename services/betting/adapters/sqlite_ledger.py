@@ -112,6 +112,23 @@ CREATE INDEX IF NOT EXISTS idx_pick_signals_pick_id
 
 CREATE INDEX IF NOT EXISTS idx_pick_signals_agent_id
     ON pick_signals (agent_id);
+
+CREATE TABLE IF NOT EXISTS backtest_reports (
+    id                  TEXT PRIMARY KEY,
+    profile_id          TEXT NOT NULL,
+    league              TEXT NOT NULL,
+    season              TEXT NOT NULL,
+    date_from           TEXT,
+    date_to             TEXT,
+    fixtures_processed  INTEGER NOT NULL DEFAULT 0,
+    picks_made          INTEGER NOT NULL DEFAULT 0,
+    equity_curve        TEXT NOT NULL DEFAULT '[]',
+    pnl_summary         TEXT NOT NULL DEFAULT '{}',
+    created_at          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_reports_profile
+    ON backtest_reports (profile_id);
 """
 
 _MIGRATION_ADD_SETTLEMENT_COLUMNS = """

@@ -201,6 +201,8 @@ def run_settlement_job() -> None:
         agent_repo=agent_repo,
     )
     for profile in active_profiles:
+        if profile.type == "backtest":
+            continue
         logger.info("Settlement for profile %s (%s)", profile.name, profile.id)
         settlement = result_service.settle_pending_picks(
             c.active_leagues,
@@ -277,6 +279,8 @@ def run_continuous_job() -> None:
     ledger_service = LedgerService(repository=c.ledger_repo)
 
     for profile in active_profiles:
+        if profile.type == "backtest":
+            continue
         profile_id = profile.id
         profile_type = profile.type
         logger.info("Analysis for profile %s (%s, %s)", profile.name, profile_id, profile_type)

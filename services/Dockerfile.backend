@@ -1,5 +1,30 @@
 FROM python:3.11-slim
 WORKDIR /app
-COPY backend/app ./app
+
+# ── Install Poetry ────────────────────────────────────────────────────────────
+RUN pip install --no-cache-dir poetry==1.8.2
+
+# ── Install betting package dependencies ──────────────────────────────────────
+COPY pyproject.toml poetry.lock* /tmp/betting_pkg/
+RUN cd /tmp/betting_pkg \
+    && poetry config virtualenvs.create false \
+    && poetry install --no-interaction --no-ansi --only main --no-root \
+    && rm -rf /tmp/betting_pkg
+
+# ── Install backend-only dependencies ─────────────────────────────────────────
 RUN pip install --no-cache-dir fastapi uvicorn aiofiles
+
+# ── Copy betting source ───────────────────────────────────────────────────────
+COPY services/betting/ ./betting/
+
+# ── Copy configuration YAML files ─────────────────────────────────────────────
+COPY config/ ./config/
+
+# ── Copy backend app ──────────────────────────────────────────────────────────
+COPY services/backend/app ./app
+
+RUN mkdir -p /data/db /data/csv_cache /data/logs /data/heartbeat
+
+ENV PYTHONUNBUFFERED=1
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

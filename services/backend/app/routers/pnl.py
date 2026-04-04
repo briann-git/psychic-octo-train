@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
-from app.database import get_db, resolve_profile_id
+from app.database import get_db_for_profile
 
 router = APIRouter()
 
@@ -11,8 +11,7 @@ router = APIRouter()
 def get_pnl(profile: Optional[str] = Query(None)):
     result: dict = {"agents": [], "daily_series": []}
     try:
-        with get_db() as conn:
-            pid = resolve_profile_id(conn, profile)
+        with get_db_for_profile(profile) as (conn, pid):
 
             agent_q = "SELECT DISTINCT agent_id FROM agent_picks"
             agent_p: list = []

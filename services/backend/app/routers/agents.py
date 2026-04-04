@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.database import get_db, get_rw_db, rows_to_dicts, resolve_profile_id
+from app.database import get_db_for_profile, get_rw_db_for_profile, rows_to_dicts
 
 router = APIRouter()
 
@@ -11,8 +11,7 @@ router = APIRouter()
 @router.get("")
 def get_agents(profile: Optional[str] = Query(None)):
     try:
-        with get_db() as conn:
-            pid = resolve_profile_id(conn, profile)
+        with get_db_for_profile(profile) as (conn, pid):
             if pid:
                 agents = rows_to_dicts(conn.execute(
                     "SELECT * FROM agent_states WHERE profile_id = ? ORDER BY id", (pid,)
@@ -54,10 +53,7 @@ def get_agents(profile: Optional[str] = Query(None)):
 
 @router.post("/{agent_id}/decommission")
 def decommission_agent(agent_id: str, profile: Optional[str] = Query(None)):
-    with get_rw_db() as conn:
-        pid = profile or (
-            conn.execute("SELECT id FROM profiles WHERE is_active = 1 LIMIT 1").fetchone() or {}
-        ).get("id")
+    with get_rw_db_for_profile(profile) as (conn, pid):
         if not pid:
             raise HTTPException(400, detail="No profile specified or active")
         agent = conn.execute(
@@ -78,10 +74,7 @@ def decommission_agent(agent_id: str, profile: Optional[str] = Query(None)):
 
 @router.post("/{agent_id}/recommission")
 def recommission_agent(agent_id: str, profile: Optional[str] = Query(None)):
-    with get_rw_db() as conn:
-        pid = profile or (
-            conn.execute("SELECT id FROM profiles WHERE is_active = 1 LIMIT 1").fetchone() or {}
-        ).get("id")
+    with get_rw_db_for_profile(profile) as (conn, pid):
         if not pid:
             raise HTTPException(400, detail="No profile specified or active")
         agent = conn.execute(

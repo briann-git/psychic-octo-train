@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
-from app.database import get_db, rows_to_dicts, resolve_profile_id
+from app.database import get_db_for_profile, rows_to_dicts
 
 router = APIRouter()
 
@@ -16,8 +16,7 @@ def get_picks(
     limit:   int           = Query(200, ge=1, le=1000),
 ):
     try:
-        with get_db() as conn:
-            pid = resolve_profile_id(conn, profile)
+        with get_db_for_profile(profile) as (conn, pid):
             q = "SELECT * FROM agent_picks WHERE 1=1"
             p: list = []
             if pid:

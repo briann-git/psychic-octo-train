@@ -10,23 +10,31 @@ services:
       - ./data/backups:/data/backups
       - ./data/logs:/data/logs
       - ./data/heartbeat:/data/heartbeat
+      - ./services/betting:/app/betting
+      - ./config:/app/config
     environment:
       DB_PATH: /data/db/ledger.db
       CSV_CACHE_DIR: /data/csv_cache
 
   backend:
     build:
-      context: ./services
-      dockerfile: Dockerfile.backend
+      context: .
+      dockerfile: services/Dockerfile.backend
     restart: always
     volumes:
       - ./data/db:/data/db
+      - ./data/csv_cache:/data/csv_cache
       - ./data/logs:/data/logs:ro
       - ./data/heartbeat:/data/heartbeat:ro
+      - ./services/betting:/app/betting
+      - ./services/backend/app:/app/app
+      - ./config:/app/config
     env_file:
       - .env
     environment:
       DB_PATH: /data/db/ledger.db
+      BACKTEST_DB_PATH: /data/db/backtest.db
+      CSV_CACHE_DIR: /data/csv_cache
     depends_on:
       - scheduler
     # Not exposed externally — only reachable by the frontend container

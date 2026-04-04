@@ -1,6 +1,7 @@
 import os
 
 DB_PATH = os.environ.get("DB_PATH", "/data/db/ledger.db")
+BACKTEST_DB_PATH = os.environ.get("BACKTEST_DB_PATH", "/data/db/backtest.db")
 LOG_DIR = os.environ.get("LOG_DIR", "/data/logs")
 LOG_FILE = os.path.join(LOG_DIR, "scheduler.log")
 HEARTBEAT_DIR = os.environ.get("HEARTBEAT_DIR", "/data/heartbeat")
