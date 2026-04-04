@@ -37,7 +37,7 @@ class TestBootstrapAgents:
         assert a is not None
         assert a.policy.statistical_weight == pytest.approx(0.80)
         assert a.policy.market_weight == pytest.approx(0.20)
-        assert a.policy.confidence_threshold == pytest.approx(0.62)
+        assert a.policy.confidence_threshold == pytest.approx(0.40)
         assert a.policy.staking_strategy == "flat"
         assert a.bankroll == 1000.0
 

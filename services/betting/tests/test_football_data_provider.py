@@ -37,10 +37,18 @@ def _write_csv(rows: list[dict], bom: bool = False) -> str:
     return path
 
 
-def _make_provider(csv_path: str) -> FootballDataProvider:
+def _make_league_loader(team_name_map: dict | None = None) -> MagicMock:
+    """Return a league loader that recognises 'PL'."""
+    loader = MagicMock()
+    loader.football_data_code.side_effect = lambda league: "E0" if league == "PL" else None
+    loader.team_names.return_value = team_name_map or {}
+    return loader
+
+
+def _make_provider(csv_path: str, team_name_map: dict | None = None) -> FootballDataProvider:
     csv_service = MagicMock()
     csv_service.get.return_value = csv_path
-    return FootballDataProvider(csv_service=csv_service)
+    return FootballDataProvider(csv_service=csv_service, league_loader=_make_league_loader(team_name_map))
 
 
 def _enough_rows(home_team: str, away_team: str, n: int = MIN_GAMES_THRESHOLD) -> list[dict]:
@@ -223,7 +231,7 @@ class TestTeamNameNormalisation:
             rows.append({"HomeTeam": "Chelsea", "AwayTeam": "Man United", "FTHG": 1, "FTAG": 1})
         path = _write_csv(rows)
         try:
-            provider = _make_provider(path)
+            provider = _make_provider(path, team_name_map={"Man United": "Manchester United"})
             # Look up using normalised name (The Odds API convention)
             fixture = _make_fixture("Manchester United", "Chelsea")
             home_attack, _, _, _ = provider.get_attack_defence_ratings(fixture)
