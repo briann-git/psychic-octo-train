@@ -6,6 +6,7 @@ const NAV = [
   { id: 'pnl',       icon: '▲', label: 'P&L' },
   { id: 'agents',    icon: '⬡', label: 'Agents' },
   { id: 'fixtures',  icon: '▦', label: 'Fixtures' },
+  { id: 'backtests', icon: '⟳', label: 'Backtests' },
   { id: 'logs',      icon: '≡', label: 'Logs' },
   { id: 'profiles',  icon: '◉', label: 'Profiles' },
   { id: 'system',    icon: '⚙', label: 'System' },

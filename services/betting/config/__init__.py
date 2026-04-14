@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     odds_api_key: str                   # required — no default
     db_path: str = "ledger.db"
+    backtest_db_path: str = "backtest.db"
     confidence_threshold: float = 0.40
     min_lead_hours: int = 2
     max_lead_hours: int = 48

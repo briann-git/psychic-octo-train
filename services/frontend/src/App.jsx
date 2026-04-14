@@ -8,6 +8,7 @@ import FixturesPage  from './pages/FixturesPage';
 import LogsPage      from './pages/LogsPage';
 import ProfilesPage  from './pages/ProfilesPage';
 import SystemPage    from './pages/SystemPage';
+import BacktestsPage from './pages/BacktestsPage';
 import useProfiles from './hooks/useProfiles';
 import useApi from './hooks/useApi';
 import { fetchPnl } from './api/endpoints';
@@ -20,6 +21,7 @@ const PAGES = {
   fixtures:  FixturesPage,
   logs:      LogsPage,
   profiles:  ProfilesPage,
+  backtests: BacktestsPage,
   system:    SystemPage,
 };
 
@@ -89,6 +91,7 @@ export default function App() {
         createProfile={createProfile}
         removeProfile={removeProfile}
         reloadProfiles={reloadProfiles}
+        setPage={setPage}
       />
     </Shell>
   );

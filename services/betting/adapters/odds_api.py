@@ -1,4 +1,7 @@
+import json
 import logging
+import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +16,32 @@ from betting.models.odds import OddsSnapshot
 from betting.utils import season_from_date
 
 logger = logging.getLogger(__name__)
+
+_HEARTBEAT_DIR = os.environ.get("HEARTBEAT_DIR", "/data/heartbeat")
+_QUOTA_FILE = os.path.join(_HEARTBEAT_DIR, "odds_quota.json")
+
+
+def _persist_quota(response: httpx.Response) -> None:
+    """Write x-requests-* headers from an Odds API response to a JSON file."""
+    remaining = response.headers.get("x-requests-remaining")
+    used = response.headers.get("x-requests-used")
+    last = response.headers.get("x-requests-last")
+    if remaining is None and used is None:
+        return
+    payload = {
+        "remaining": int(remaining) if remaining is not None else None,
+        "used": int(used) if used is not None else None,
+        "last": int(last) if last is not None else None,
+        "updated_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    try:
+        os.makedirs(_HEARTBEAT_DIR, exist_ok=True)
+        tmp = _QUOTA_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp, _QUOTA_FILE)
+    except OSError as exc:
+        logger.warning("Could not write odds quota file: %s", exc)
 
 PREFERRED_BOOKMAKERS: list[str] = ["bet365", "williamhill", "betfair_ex_eu"]
 
@@ -30,6 +59,7 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
         self._league_loader = league_loader or LeagueConfigLoader()
         self._market_loader = market_loader or MarketConfigLoader()
         self._cache: dict[str, list[dict]] = {}
+        self._historical_cache: dict[str, list[dict]] = {}
 
     # ------------------------------------------------------------------
     # IFixtureProvider
@@ -98,6 +128,91 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
         return snapshots
 
     # ------------------------------------------------------------------
+    # Historical odds (backtesting)
+    # ------------------------------------------------------------------
+
+    def fetch_historical_odds_for_match(
+        self,
+        fixture: "Fixture",
+        as_of: datetime,
+        markets: list[str],
+    ) -> list[OddsSnapshot]:
+        """
+        Fetch pre-match odds for a single fixture using The Odds API historical
+        endpoint (GET /v4/historical/sports/{sport}/odds?date={as_of}).
+
+        The response format mirrors the live /odds endpoint, so all existing
+        snapshot-building helpers are reused directly.
+
+        Results are cached per (sport_key, as_of date) to avoid redundant
+        paid API calls within a single backtest run.
+        """
+        sport_key = self._league_loader.odds_api_key(fixture.league)
+        if sport_key is None:
+            logger.warning("League %r not in config — cannot fetch historical odds", fixture.league)
+            return []
+
+        cache_key = f"{sport_key}_{as_of.date().isoformat()}"
+        if cache_key not in self._historical_cache:
+            market_keys = list({
+                m.odds_api_market_key
+                for m in self._market_loader.active_markets()
+            })
+            try:
+                response = httpx.get(
+                    f"https://api.the-odds-api.com/v4/historical/sports/{sport_key}/odds",
+                    params={
+                        "apiKey": self._api_key,
+                        "regions": "eu",
+                        "markets": ",".join(market_keys),
+                        "oddsFormat": "decimal",
+                        "date": as_of.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    },
+                    timeout=15,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                # Historical endpoint wraps data in {"data": [...], "timestamp": ..., ...}
+                events = payload.get("data", payload) if isinstance(payload, dict) else payload
+                self._historical_cache[cache_key] = events if isinstance(events, list) else []
+            except httpx.HTTPStatusError as exc:
+                safe_url = str(exc.request.url).split("apiKey")[0] + "apiKey=REDACTED"
+                logger.error(
+                    "HTTP error from Odds API historical endpoint — status %s, url %s",
+                    exc.response.status_code,
+                    safe_url,
+                )
+                return []
+            except Exception as exc:
+                logger.error("Failed to fetch historical odds for %s on %s: %s", fixture.league, as_of.date(), exc)
+                return []
+
+        events = self._historical_cache[cache_key]
+
+        # Match event by team names (Odds API names, already on the Fixture)
+        event = next(
+            (
+                e for e in events
+                if e.get("home_team") == fixture.home_team
+                and e.get("away_team") == fixture.away_team
+            ),
+            None,
+        )
+        if event is None:
+            logger.debug(
+                "No historical odds event found for %s vs %s on %s",
+                fixture.home_team, fixture.away_team, as_of.date(),
+            )
+            return []
+
+        snapshots: list[OddsSnapshot] = []
+        for market_id in markets:
+            snapshot = self._build_odds_snapshot(event, fixture.id, market_id)
+            if snapshot:
+                snapshots.append(snapshot)
+        return snapshots
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -133,6 +248,7 @@ class OddsApiProvider(IFixtureProvider, IOddsProvider):
             )
             raise
 
+        _persist_quota(response)
         events: list[dict] = response.json()
         self._cache[sport_key] = events
         return events

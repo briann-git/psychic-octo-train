@@ -8,6 +8,9 @@ class BettingState(TypedDict):
     odds_snapshot: dict                  # serialised OddsSnapshot
     eligible: bool                       # False = skip entire pipeline
 
+    # Set by the backtest runner (None during live/paper operation)
+    cutoff_date: Optional[str]           # ISO-format datetime for look-ahead prevention
+
     # Set by StatisticalNode
     statistical_signal: Optional[dict]   # serialised Signal
 

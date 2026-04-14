@@ -1,5 +1,6 @@
 import logging
 from dataclasses import asdict
+from datetime import datetime, timezone
 
 from betting.graph.state import BettingState
 from betting.models.fixture import Fixture
@@ -20,8 +21,18 @@ class StatisticalNode:
         fixture = Fixture.from_dict(state["fixture"])
         odds = OddsSnapshot.from_dict(state["odds_snapshot"])
 
+        cutoff_date = None
+        raw_cutoff = state.get("cutoff_date")
+        if raw_cutoff:
+            try:
+                cutoff_date = datetime.fromisoformat(raw_cutoff)
+                if cutoff_date.tzinfo is None:
+                    cutoff_date = cutoff_date.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                pass
+
         try:
-            signal = self._service.analyse(fixture, odds)
+            signal = self._service.analyse(fixture, odds, cutoff_date=cutoff_date)
             return {"statistical_signal": asdict(signal)}
         except Exception as exc:
             logger.warning(

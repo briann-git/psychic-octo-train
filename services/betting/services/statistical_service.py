@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Optional
 
 from scipy.stats import poisson  # type: ignore[import-untyped]
 
@@ -21,7 +22,12 @@ class StatisticalService:
         self._stats_provider = stats_provider
         self._market_loader = market_loader or MarketConfigLoader()
 
-    def analyse(self, fixture: Fixture, odds: OddsSnapshot) -> Signal:
+    def analyse(
+        self,
+        fixture: Fixture,
+        odds: OddsSnapshot,
+        cutoff_date: Optional[datetime] = None,
+    ) -> Signal:
         """
         1. Fetch attack/defence ratings for both teams from stats_provider.
         2. Compute expected goals (home_xg, away_xg) via Poisson model.
@@ -29,16 +35,17 @@ class StatisticalService:
         4. Dispatch to ProbabilityCalculator for the market's evaluation_strategy.
         5. Compare model probability to implied probability from odds.
         6. Return Signal with best selection, confidence and edge.
+        If cutoff_date is set, only historical data up to that date is used.
         """
         market = self._market_loader.get(odds.market)
         if not market:
             raise ValueError(f"Market {odds.market!r} not in registry")
 
         home_attack, home_defence, away_attack, away_defence = (
-            self._stats_provider.get_attack_defence_ratings(fixture)
+            self._stats_provider.get_attack_defence_ratings(fixture, cutoff_date=cutoff_date)
         )
         league_avg_home, league_avg_away = self._stats_provider.get_league_averages(
-            fixture.league, fixture.season
+            fixture.league, fixture.season, cutoff_date=cutoff_date
         )
 
         home_xg, away_xg = self._expected_goals(

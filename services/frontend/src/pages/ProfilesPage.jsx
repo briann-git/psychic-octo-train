@@ -1,18 +1,34 @@
 import { useState } from 'react';
 import tokens from '../tokens';
 import Card from '../components/primitives/Card';
-import CardTitle from '../components/primitives/CardTitle';
 import SectionTitle from '../components/primitives/SectionTitle';
 import ProfileWizard from '../components/wizard/ProfileWizard';
+import BacktestModal from '../components/wizard/BacktestModal';
+import useApi from '../hooks/useApi';
+import { fetchBacktestReports } from '../api/endpoints';
 
 const TYPE_COLORS = {
   paper:    { fg: tokens.colors.amber, bg: tokens.colors.amberDim },
   live:     { fg: tokens.colors.green, bg: tokens.colors.greenDim },
-  backtest: { fg: tokens.colors.cyan ?? '#67e8f9', bg: tokens.colors.cyanDim ?? 'rgba(103,232,249,.08)' },
+  backtest: { fg: tokens.colors.blue,  bg: tokens.colors.blueDim  },
 };
 
-export default function ProfilesPage({ profiles, toggleActive, createProfile, removeProfile }) {
+export default function ProfilesPage({ profiles, toggleActive, createProfile, removeProfile, selectProfile, setPage }) {
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [backtestProfile, setBacktestProfile] = useState(null);
+
+  const { data: allReports, refetch: reloadReports } = useApi(fetchBacktestReports, { interval: 0 });
+  const reportCountByProfile = (allReports || []).reduce((acc, r) => {
+    acc[r.profile_id] = (acc[r.profile_id] || 0) + 1;
+    return acc;
+  }, {});
+
+  const handleRunComplete = (profileId) => {
+    reloadReports();
+    setBacktestProfile(null);
+    if (selectProfile) selectProfile(profileId);
+    if (setPage) setPage('backtests');
+  };
 
   return (
     <div>
@@ -21,12 +37,13 @@ export default function ProfilesPage({ profiles, toggleActive, createProfile, re
       <div style={{ maxWidth: 640 }} className="fade-in s1">
         <div style={{ marginBottom: 16, fontSize: 12, color: tokens.colors.muted, lineHeight: 1.8 }}>
           Each profile isolates its own picks, agent states, and P&L.
-          Active profiles are processed by the scheduler — you can run several simultaneously.
+          Active profiles are processed by the scheduler.
         </div>
 
         {(profiles || []).map(p => {
           const tc = TYPE_COLORS[p.type] || TYPE_COLORS.paper;
           const isActive = p.is_active;
+          const reportCount = reportCountByProfile[p.id] || 0;
           return (
             <div key={p.id} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -41,12 +58,26 @@ export default function ProfilesPage({ profiles, toggleActive, createProfile, re
                   fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase',
                   padding: '1px 5px', border: `1px solid ${tc.fg}`, color: tc.fg, background: tc.bg,
                 }}>{p.type}</span>
+                {reportCount > 0 && (
+                  <span
+                    onClick={() => { if (selectProfile) selectProfile(p.id); if (setPage) setPage('backtests'); }}
+                    style={{
+                      fontSize: 9, letterSpacing: '.08em', padding: '1px 6px', cursor: 'pointer',
+                      border: `1px solid ${tokens.colors.blue}`, color: tokens.colors.blue,
+                      background: tokens.colors.blueDim,
+                    }}
+                  >{reportCount} {reportCount === 1 ? 'backtest' : 'backtests'}</span>
+                )}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <span
                   onClick={() => toggleActive(p.id)}
                   style={{ fontSize: 11, cursor: 'pointer', color: isActive ? tokens.colors.amber : tokens.colors.green, letterSpacing: '.05em' }}
                 >{isActive ? 'Deactivate' : 'Activate'}</span>
+                <span
+                  onClick={() => setBacktestProfile(p)}
+                  style={{ fontSize: 11, cursor: 'pointer', color: tokens.colors.blue, letterSpacing: '.05em' }}
+                >Backtest</span>
                 {!isActive && (
                   <span onClick={() => removeProfile(p.id)} style={{ fontSize: 11, cursor: 'pointer', color: tokens.colors.red, letterSpacing: '.05em' }}>Delete</span>
                 )}
@@ -71,6 +102,13 @@ export default function ProfilesPage({ profiles, toggleActive, createProfile, re
           open={wizardOpen}
           onClose={() => setWizardOpen(false)}
           onCreate={createProfile}
+        />
+
+        <BacktestModal
+          profile={backtestProfile}
+          open={!!backtestProfile}
+          onClose={() => setBacktestProfile(null)}
+          onComplete={handleRunComplete}
         />
 
         {(profiles || []).some(p => p.is_active && p.type === 'live') && (

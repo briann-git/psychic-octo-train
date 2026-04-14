@@ -1,6 +1,8 @@
 import csv
 import logging
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
 
 from betting.config.league_config import LeagueConfigLoader
 from betting.interfaces.stats_provider import IStatsProvider
@@ -39,7 +41,9 @@ class FootballDataProvider(IStatsProvider):
         self._ratings_cache: dict[str, SeasonRatings] = {}
 
     def get_attack_defence_ratings(
-        self, fixture: Fixture
+        self,
+        fixture: Fixture,
+        cutoff_date: Optional[datetime] = None,
     ) -> tuple[float, float, float, float]:
         """
         Returns (home_attack, home_defence, away_attack, away_defence).
@@ -48,6 +52,7 @@ class FootballDataProvider(IStatsProvider):
           - League not supported
           - Team not found in season data
           - Team has fewer than MIN_GAMES_THRESHOLD results
+        If cutoff_date is provided, only rows before that date are used.
         """
         league = fixture.league
         season = fixture.season
@@ -56,7 +61,7 @@ class FootballDataProvider(IStatsProvider):
             logger.warning("League %r not in config, returning 1.0 ratings", league)
             return 1.0, 1.0, 1.0, 1.0
 
-        ratings = self._get_season_ratings(league, season)
+        ratings = self._get_season_ratings(league, season, cutoff_date=cutoff_date)
         if ratings is None:
             return 1.0, 1.0, 1.0, 1.0
 
@@ -88,36 +93,48 @@ class FootballDataProvider(IStatsProvider):
         return home_attack, home_defence, away_attack, away_defence
 
     def get_league_averages(
-        self, league: str, season: str
+        self,
+        league: str,
+        season: str,
+        cutoff_date: Optional[datetime] = None,
     ) -> tuple[float, float]:
         """
         Returns (league_avg_home_goals, league_avg_away_goals).
         Derived from full season data for the given league/season.
+        If cutoff_date is provided, only rows before that date are used.
         """
         if self._league_loader.football_data_code(league) is None:
             logger.warning("League %r not in config, returning default averages", league)
             return 1.5, 1.2
 
-        ratings = self._get_season_ratings(league, season)
+        ratings = self._get_season_ratings(league, season, cutoff_date=cutoff_date)
         if ratings is None:
             return 1.5, 1.2
 
         return ratings.league_avg_home, ratings.league_avg_away
 
-    def _get_season_ratings(self, league: str, season: str) -> SeasonRatings | None:
-        cache_key = f"{league}_{season}"
+    def _get_season_ratings(
+        self,
+        league: str,
+        season: str,
+        cutoff_date: Optional[datetime] = None,
+    ) -> SeasonRatings | None:
+        cutoff_str = cutoff_date.date().isoformat() if cutoff_date else "all"
+        cache_key = f"{league}_{season}_{cutoff_str}"
         if cache_key in self._ratings_cache:
             return self._ratings_cache[cache_key]
 
         try:
-            ratings = self._load_ratings(league, season)
+            ratings = self._load_ratings(league, season, cutoff_date=cutoff_date)
             self._ratings_cache[cache_key] = ratings
             return ratings
         except Exception as exc:
             logger.warning("Failed to load ratings for %s %s: %s", league, season, exc)
             return None
 
-    def _load_ratings(self, league: str, season: str) -> SeasonRatings:
+    def _load_ratings(
+        self, league: str, season: str, cutoff_date: Optional[datetime] = None
+    ) -> SeasonRatings:
         """
         Reads CSV via CsvDownloadService, parses into SeasonRatings.
         Skips rows with missing FTHG or FTAG (unplayed fixtures).
@@ -150,6 +167,19 @@ class FootballDataProvider(IStatsProvider):
                     ftag = float(ftag_raw)
                 except ValueError:
                     continue
+
+                if cutoff_date is not None:
+                    date_raw = row.get("Date", "").strip()
+                    if date_raw:
+                        row_date = None
+                        for _fmt in ("%d/%m/%Y", "%d/%m/%y"):
+                            try:
+                                row_date = datetime.strptime(date_raw, _fmt)
+                                break
+                            except ValueError:
+                                pass
+                        if row_date is not None and row_date >= cutoff_date.replace(tzinfo=None):
+                            continue
 
                 home_team_raw = row.get("HomeTeam", "").strip()
                 away_team_raw = row.get("AwayTeam", "").strip()

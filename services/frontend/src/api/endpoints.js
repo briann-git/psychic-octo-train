@@ -4,6 +4,7 @@ export const fetchStatus   = () => get('/status');
 export const fetchConfig   = () => get('/config');
 export const updateConfig  = (body) => patch('/config', body);
 export const fetchJobs     = () => get('/jobs');
+export const fetchQuota    = () => get('/quota');
 
 // ── Profiles ────────────────────────────────────────────────────────────────
 
@@ -40,11 +41,12 @@ export function fetchPnl(profileId) {
   return get(`/pnl${qs ? '?' + qs : ''}`);
 }
 
-export function fetchPicks({ status, agent, limit, profileId } = {}) {
+export function fetchPicks({ status, agent, date, limit, profileId } = {}) {
   const p = new URLSearchParams();
   if (profileId) p.set('profile', profileId);
   if (status) p.set('status', status);
   if (agent)  p.set('agent', agent);
+  if (date)   p.set('date', date);
   if (limit)  p.set('limit', String(limit));
   const qs = p.toString();
   return get(`/picks${qs ? '?' + qs : ''}`);
@@ -65,3 +67,20 @@ export function fetchLogs({ level, limit } = {}) {
   const qs = p.toString();
   return get(`/logs${qs ? '?' + qs : ''}`);
 }
+
+// ── Backtest ──────────────────────────────────────────────────────────────────
+
+export const runBacktest = (profileId, config) =>
+  post('/backtest/run', { profile_id: profileId, ...config });
+
+export const fetchBacktestReports = (profileId) => {
+  const qs = profileId ? `?profile=${encodeURIComponent(profileId)}` : '';
+  return get(`/backtest/reports${qs}`);
+};
+
+export const fetchBacktestReport = (reportId) =>
+  get(`/backtest/reports/${encodeURIComponent(reportId)}`);
+
+export const deleteBacktestReport = (reportId) =>
+  del(`/backtest/reports/${encodeURIComponent(reportId)}`);
+
